@@ -1,10 +1,12 @@
 // Copyright [2018] Alibaba Cloud All rights reserved
+#include "util.h"
+#include "data_store.h"
+
+#include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <vector>
-#include "util.h"
-#include "data_store.h"
 
 namespace polar_race {
 
@@ -106,7 +108,7 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
   }
   *value = std::string(buf, l.len);
 
-  delete buf;
+  delete [] buf;
   close(fd);
   return kSucc;
 }

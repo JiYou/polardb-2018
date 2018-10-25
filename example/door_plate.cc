@@ -54,11 +54,14 @@ RetCode DoorPlate::Init() {
     fd = open(path.c_str(), O_RDWR | O_CREAT, 0644);
     if (fd >= 0) {
       new_create = true;
+#ifdef __linux__
       if (posix_fallocate(fd, 0, map_size) != 0) {
         std::cerr << "posix_fallocate failed: " << strerror(errno) << std::endl;
         close(fd);
         return kIOError;
       }
+#endif
+    // TODO: add support here for mac.
     }
   }
   if (fd < 0) {

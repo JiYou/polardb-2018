@@ -1,7 +1,7 @@
+#include "include/engine.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string>
-#include "include/engine.h"
 
 static const char kEnginePath[] = "/tmp/test_engine";
 static const char kDumpPath[] = "/tmp/test_dump";
