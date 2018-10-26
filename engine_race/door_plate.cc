@@ -1,5 +1,8 @@
 // Copyright [2018] Alibaba Cloud All rights reserved
 
+#include "util.h"
+#include "door_plate.h"
+
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -9,9 +12,6 @@
 #include <cstring>
 #include <iostream>
 #include <utility>
-#include "util.h"
-#include "door_plate.h"
-
 #include <stdio.h>
 
 namespace polar_race {
@@ -72,8 +72,8 @@ RetCode DoorPlate::Init() {
       new_create = true;
       // allocate the file size.
       if (posix_fallocate(fd, 0, map_size) != 0) {
-        std::cerr << "posix_fallocate failed: " << strerror(errno) << std::endl;
         close(fd);
+        DEBUG << "posix_fallocate failed: " << strerror(errno) << std::endl;
         return kIOError;
       } else {
         std::cout << "posix_fallocate: success: " << map_size << std::endl;
@@ -81,14 +81,15 @@ RetCode DoorPlate::Init() {
     }
   }
   if (fd < 0) {
+    DEBUG << "create file failed = " << path << std::endl;
     return kIOError;
   }
   fd_ = fd;
 
   void* ptr = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
   if (ptr == MAP_FAILED) {
-    std::cerr << "MAP_FAILED: " << strerror(errno) << std::endl;
     close(fd);
+    DEBUG << "MAP_FAILED: " << strerror(errno) << std::endl;
     return kIOError;
   }
 
@@ -146,6 +147,7 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
     // new item
     memcpy(iptr->key, key.data(), key.size());
     if (0 != msync(iptr->key, key.size(), MS_SYNC)) {
+      DEBUG << " msync failed " << std::endl;
       return kIOError;
     }
     iptr->key_size = key.size();
@@ -159,6 +161,7 @@ RetCode DoorPlate::Find(const std::string& key, Location *location) {
   int index = CalcIndex(key);
   if (index < 0
       || !ItemKeyMatch(*(items_ + index), key)) {
+    DEBUG << " index < 0: " << (index < 0) << " KeyMatch() = " << (!ItemKeyMatch(*(items_ + index), key)) << std::endl;
     return kNotFound;
   }
 

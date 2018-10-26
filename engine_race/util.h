@@ -5,6 +5,9 @@
 #include <pthread.h>
 #include <string>
 #include <vector>
+#include<iostream>
+
+#define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"()"<<
 
 namespace polar_race {
 
