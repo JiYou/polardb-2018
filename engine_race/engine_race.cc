@@ -23,25 +23,25 @@ Engine::~Engine() {
 
 RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   *eptr = NULL;
-  EngineRace *engine_example = new EngineRace(name);
+  EngineRace *engine_race = new EngineRace(name);
 
-  RetCode ret = engine_example->plate_.Init();
+  RetCode ret = engine_race->plate_.Init();
   if (ret != kSucc) {
-    delete engine_example;
+    delete engine_race;
     return ret;
   }
-  ret = engine_example->store_.Init();
+  ret = engine_race->store_.Init();
   if (ret != kSucc) {
-    delete engine_example;
+    delete engine_race;
     return ret;
   }
 
-  if (0 != LockFile(name + "/" + kLockFile, &(engine_example->db_lock_))) {
-    delete engine_example;
+  if (0 != LockFile(name + "/" + kLockFile, &(engine_race->db_lock_))) {
+    delete engine_race;
     return kIOError;
   }
 
-  *eptr = engine_example;
+  *eptr = engine_race;
   return kSucc;
 }
 
@@ -57,11 +57,9 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   // 这里分了两步，第一步是先把value放到文件中
   // 这里分了两步
   // 如果数据写烂了怎么办？
-  printf("begin to append value into file.\n");
   RetCode ret = store_.Append(value.ToString(), &location);
   if (ret == kSucc) {
     // 这里再把key添加到hash文件里面
-    printf("begin to insert into hash map.\n");
     ret = plate_.AddOrUpdate(key.ToString(), location);
   }
   pthread_mutex_unlock(&mu_);

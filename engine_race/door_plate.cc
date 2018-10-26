@@ -1,4 +1,6 @@
 // Copyright [2018] Alibaba Cloud All rights reserved
+
+#include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -19,8 +21,14 @@ static const uint32_t kMaxDoorCnt = 1024 * 1024 * 32;
 static const char kMetaFileName[] = "META";
 static const int kMaxRangeBufCount = kMaxDoorCnt;
 
-// 这里只是简单看一下两个key是否一样
-// 如果长度不相等，那么就使用mmcmp来比较。
+
+// get memory page size.
+static long page_size() {
+  static long page_size = sysconf(_SC_PAGESIZE);
+  return page_size;
+}
+
+// just simply compare the key is same or not.
 static bool ItemKeyMatch(const Item &item, const std::string& target) {
   if (target.size() != item.key_size
       || memcmp(item.key, target.data(), item.key_size) != 0) {
@@ -30,9 +38,7 @@ static bool ItemKeyMatch(const Item &item, const std::string& target) {
   return true;
 }
 
-// 是否可以把数据放到相应的位置？
-// 也就是说，这个位置是空的么？
-// 如果是空的，那么直接返回true
+// can use this item place
 static bool ItemTryPlace(const Item &item, const std::string& target) {
   if (item.in_use == 0) {
     return true;
@@ -48,6 +54,7 @@ DoorPlate::DoorPlate(const std::string& path)
 }
 
 RetCode DoorPlate::Init() {
+  std::cout << "DoorPlate::Init()" << std::endl;
   bool new_create = false;
   // 使用了memmap?
   // 32M item * sizeof(Item);
@@ -56,7 +63,10 @@ RetCode DoorPlate::Init() {
   // 如果目录不存在，创建之
   if (!FileExists(dir_)
       && 0 != mkdir(dir_.c_str(), 0755)) {
+    printf("DoorPlate::Init(): mkdir  %s failed\n", dir_.c_str());
     return kIOError;
+  } else {
+    printf("DoorPlace::Init() mkdir %s success\n", dir_.c_str());
   }
 
   // 找到META文件
@@ -67,11 +77,13 @@ RetCode DoorPlate::Init() {
     fd = open(path.c_str(), O_RDWR | O_CREAT, 0644);
     if (fd >= 0) {
       new_create = true;
-      // 分配好相应的大小
+      // allocate the file size.
       if (posix_fallocate(fd, 0, map_size) != 0) {
         std::cerr << "posix_fallocate failed: " << strerror(errno) << std::endl;
         close(fd);
         return kIOError;
+      } else {
+        std::cout << "posix_fallocate: success: " << map_size << std::endl;
       }
     }
   }
@@ -130,10 +142,7 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
     return kInvalidArgument;
   }
 
-  printf("Item size = %lu\n", sizeof(Item));
-  printf("Begin to compute the index\n");
   int index = CalcIndex(key);
-  printf("Compute over the index\n");
   if (index < 0) {
     return kFull;
   }
@@ -142,9 +151,7 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
 
   if (iptr->in_use == 0) {
     // new item
-    printf("Begin to copy value into mmap file.\n");
     memcpy(iptr->key, key.data(), key.size());
-    printf("Copy over ito file.\n");
     iptr->key_size = key.size();
     iptr->in_use = 1;  // Place
   }
