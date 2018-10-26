@@ -1,6 +1,7 @@
-#include "util.h"
-#include "engine_hash.h"
+#include "util/util.h"
+#include "engine_race/engine_hash.h"
 
+#include <mutex>
 
 namespace polar_race {
 // begin of namespace polar_race
@@ -17,11 +18,19 @@ class HashTree : public Hash {
     WITH_NO_COPY_CLASS(HashTree);
   public:
     virtual RetCode Put(uint64_t key, const ValueInfo &v) override {
-
+      return kSucc;
     }
     virtual RetCode Get(uint64_t key, ValueInfo *v) override {
-
+      return kSucc;
     }
+
+    static Hash *GetInstnace() {
+        static Hash *_hashtree_;
+        static std::once_flag initialized;
+        std::call_once (initialized, [] { _hashtree_ = new HashTree();});
+        return _hashtree_;
+    }
+
   private:
     HashTree() {
         // alloc all the space for hash tree.
@@ -47,5 +56,8 @@ class HashTree : public Hash {
     }
 };
 
+Hash *GetHashTree() {
+  return HashTree::GetInstnace();
+}
 
 } // end of namespace polar_race

@@ -8,7 +8,7 @@
 // 1. change list_node_size -> sizeof(struct _ListNode)
 #pragma once
 
-#include "engine.h"
+#include "include/engine.h"
 #include "util.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,8 +28,8 @@ class Hash {
   public:
     Hash() { }
     virtual ~Hash() {}
-    virtual RetCode Put(uint64_t key, const ValueInfo &val);
-    virtual RetCode Get(uint64_t key, ValueInfo *val);
+    virtual RetCode Put(uint64_t key, const ValueInfo &val) = 0;
+    virtual RetCode Get(uint64_t key, ValueInfo *val) = 0;
 };
 
 

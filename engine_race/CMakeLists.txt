@@ -10,5 +10,14 @@ ELSE ()
     set(SYS_LIB pthread m rt)
 ENDIF()
 
-add_library(engine engine_race.cc)
+add_library(engine
+    engine_hash.cc
+    engine_race.cc
+)
 target_link_libraries(engine)
+
+SET(TEST_LIB etest_main)
+
+add_executable(test_hash engine_hash_test.cc)
+add_dependencies(test_hash engine ${TEST_LIB})
+target_link_libraries(test_hash engine ${TEST_LIB})
