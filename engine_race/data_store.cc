@@ -2,6 +2,7 @@
 #include "util.h"
 #include "data_store.h"
 
+#include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
