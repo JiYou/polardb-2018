@@ -1,0 +1,3 @@
+#!/bin/bash
+
+wget http://polardbrace.oss-cn-shanghai.aliyuncs.com/log_195147.tar
