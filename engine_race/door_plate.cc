@@ -16,10 +16,9 @@
 
 namespace polar_race {
 
-// 128M item
-static const uint32_t kMaxDoorCnt = 1024 * 1024 * 32;
+static const uint64_t kMaxDoorCnt = 1024 * 1024 * 52;
 static const char kMetaFileName[] = "META";
-static const int kMaxRangeBufCount = kMaxDoorCnt;
+static const int64_t kMaxRangeBufCount = kMaxDoorCnt;
 
 // just simply compare the key is same or not.
 static bool ItemKeyMatch(const Item &item, const std::string& target) {
@@ -51,7 +50,9 @@ RetCode DoorPlate::Init() {
   bool new_create = false;
   // 使用了memmap?
   // 32M item * sizeof(Item);
-  const int map_size = kMaxDoorCnt * sizeof(Item);
+  const uint64_t map_size = kMaxDoorCnt * sizeof(Item);
+  DEBUG << "item_size = " << sizeof(Item) << std::endl;
+  DEBUG << "map_size = " << map_size << std::endl;
 
   // 如果目录不存在，创建之
   if (!FileExists(dir_)
@@ -148,7 +149,15 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
   if (iptr->in_use == 0) {
     // new item
     memcpy(iptr->key, key.data(), key.size());
-    if (0 != msync(iptr->key, key.size(), MS_SYNC)) {
+    // if use msync, we need to check the page size.
+    // the content may across several pages.
+    void *origin_addr = reinterpret_cast<void*>(iptr->key);
+    uint64_t mod {4095};
+    mod = ~mod;
+    auto align_addr = reinterpret_cast<void*>(reinterpret_cast<uint64_t>(origin_addr) & (~4095));
+    auto left = reinterpret_cast<size_t>(iptr->key) & 4095;
+    if (0 != msync(align_addr, left + key.size(), MS_SYNC)) {
+      DEBUG << "errno = " << strerror(errno) << std::endl;
       DEBUG << " msync() failed " << std::endl;
       return kIOError;
     }

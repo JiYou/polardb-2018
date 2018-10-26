@@ -53,6 +53,15 @@ EngineRace::~EngineRace() {
 }
 
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
+  if (key.size() > 8) {
+    // check the key size.
+    static bool have_find_larger_key = false;
+    if (!have_find_larger_key) {
+      DEBUG << "have find large key size = " << key.size() << std::endl;
+      have_find_larger_key = true;
+    }
+    return kIOError;
+  }
   pthread_mutex_lock(&mu_);
   Location location;
   // firstly, write the file content.
