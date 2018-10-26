@@ -57,7 +57,7 @@ RetCode DoorPlate::Init() {
   // 如果目录不存在，创建之
   if (!FileExists(dir_)
       && 0 != mkdir(dir_.c_str(), 0755)) {
-    printf("DoorPlate::Init(): mkdir  %s failed\n", dir_.c_str());
+    DEBUG << "mkdir " << dir_ << " failed "  << std::endl;
     return kIOError;
   } else {
     printf("DoorPlace::Init() mkdir %s success\n", dir_.c_str());
