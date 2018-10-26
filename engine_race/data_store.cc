@@ -66,9 +66,7 @@ RetCode DataStore::Append(const std::string& value, Location* location) {
     return kInvalidArgument;
   }
 
-  // 如果超出当前正在写的文件的大小，那么这里直接生成一个新的文件
   if (next_location_.offset + value.size() > kSingleFileSize) {
-    // Swtich to new file
     close(fd_);
     next_location_.file_no += 1;
     next_location_.offset = 0;
@@ -77,6 +75,9 @@ RetCode DataStore::Append(const std::string& value, Location* location) {
 
   // Append write
   if (0 != FileAppend(fd_, value)) {
+    return kIOError;
+  }
+  if (0 != fdatasync(fd_)) {
     return kIOError;
   }
   location->file_no = next_location_.file_no;
@@ -95,7 +96,6 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
   }
   lseek(fd, l.offset, SEEK_SET);
 
-  // 生成内存
   char* buf = new char[l.len]();
   char* pos = buf;
   uint32_t value_len = l.len;

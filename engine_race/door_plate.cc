@@ -152,6 +152,9 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
   if (iptr->in_use == 0) {
     // new item
     memcpy(iptr->key, key.data(), key.size());
+    if (0 != msync(iptr->key, key.size(), MS_SYNC)) {
+      return kIOError;
+    }
     iptr->key_size = key.size();
     iptr->in_use = 1;  // Place
   }
