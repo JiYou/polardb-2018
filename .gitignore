@@ -7,6 +7,7 @@ TODO
 # 忽略 build/ 文件夹下的所有文件
 build/
 lib/
+.vscode/
 # 忽略 doc/notes.txt, 不包括 doc/server/arch.txt
 doc/*.txt
 # 忽略所有的 .pdf 文件 在 doc/ directory 下的
