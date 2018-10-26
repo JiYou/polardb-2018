@@ -10,10 +10,12 @@
 #include "util.h"
 #include "door_plate.h"
 
+#include <stdio.h>
+
 namespace polar_race {
 
 // 128M item
-static const uint32_t kMaxDoorCnt = 1024 * 1024 * 64;
+static const uint32_t kMaxDoorCnt = 1024 * 1024 * 32;
 static const char kMetaFileName[] = "META";
 static const int kMaxRangeBufCount = kMaxDoorCnt;
 
@@ -65,15 +67,12 @@ RetCode DoorPlate::Init() {
     fd = open(path.c_str(), O_RDWR | O_CREAT, 0644);
     if (fd >= 0) {
       new_create = true;
-#ifdef __linux__
       // 分配好相应的大小
       if (posix_fallocate(fd, 0, map_size) != 0) {
         std::cerr << "posix_fallocate failed: " << strerror(errno) << std::endl;
         close(fd);
         return kIOError;
       }
-#endif
-    // TODO: add support here for mac.
     }
   }
   if (fd < 0) {
@@ -131,15 +130,21 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
     return kInvalidArgument;
   }
 
+  printf("Item size = %lu\n", sizeof(Item));
+  printf("Begin to compute the index\n");
   int index = CalcIndex(key);
+  printf("Compute over the index\n");
   if (index < 0) {
     return kFull;
   }
 
   Item* iptr = items_ + index;
+
   if (iptr->in_use == 0) {
     // new item
+    printf("Begin to copy value into mmap file.\n");
     memcpy(iptr->key, key.data(), key.size());
+    printf("Copy over ito file.\n");
     iptr->key_size = key.size();
     iptr->in_use = 1;  // Place
   }

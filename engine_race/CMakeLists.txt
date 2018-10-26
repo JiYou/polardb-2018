@@ -11,8 +11,12 @@ ELSE ()
 ENDIF()
 
 add_library(engine
-    engine_hash.cc
-    engine_race.cc
+  data_store.cc
+  door_plate.cc
+  engine_hash.cc
+  engine_hash_test.cc
+  engine_race.cc
+  util.cc
 )
 target_link_libraries(engine)
 

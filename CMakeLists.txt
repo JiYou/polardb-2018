@@ -46,5 +46,4 @@ endif()
 
 add_subdirectory(util)
 add_subdirectory(engine_race)
-add_subdirectory(example)
 add_subdirectory(test)
