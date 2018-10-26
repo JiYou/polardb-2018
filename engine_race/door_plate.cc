@@ -21,13 +21,6 @@ static const uint32_t kMaxDoorCnt = 1024 * 1024 * 32;
 static const char kMetaFileName[] = "META";
 static const int kMaxRangeBufCount = kMaxDoorCnt;
 
-
-// get memory page size.
-static long page_size() {
-  static long page_size = sysconf(_SC_PAGESIZE);
-  return page_size;
-}
-
 // just simply compare the key is same or not.
 static bool ItemKeyMatch(const Item &item, const std::string& target) {
   if (target.size() != item.key_size
