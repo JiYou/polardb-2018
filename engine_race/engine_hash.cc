@@ -49,6 +49,8 @@ class HashTree : public Hash {
         // [19 ~ 37] ~ 120MB
         // so, the first node is 19.
         // just the last node would point to another structure.
+        // the last level, is built on skiplist/immu
+        // 
     }
 
     ~HashTree() {

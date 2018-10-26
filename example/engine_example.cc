@@ -50,8 +50,12 @@ EngineExample::~EngineExample() {
 RetCode EngineExample::Write(const PolarString& key, const PolarString& value) {
   pthread_mutex_lock(&mu_);
   Location location;
+  // 这里分了两步，第一步是先把value放到文件中
+  // 这里分了两步
+  // 如果数据写烂了怎么办？
   RetCode ret = store_.Append(value.ToString(), &location);
   if (ret == kSucc) {
+    // 这里再把key添加到hash文件里面
     ret = plate_.AddOrUpdate(key.ToString(), location);
   }
   pthread_mutex_unlock(&mu_);

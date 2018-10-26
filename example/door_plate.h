@@ -18,13 +18,15 @@ static const uint32_t kMaxKeyLen = 32;
 struct Item {
   Item() : key_size(0), in_use(0) {
   }
-  Location location;
-  char key[kMaxKeyLen];
-  uint32_t key_size;
-  uint8_t in_use;
+  Location location;      // 位置
+  char key[kMaxKeyLen];   // key
+  uint32_t key_size;      // key_size
+  uint8_t in_use;         // 这个item是否被使用
 };
 
 // Hash index for key
+// 这里就是利用开地址法，在磁盘上一个大文件里面实现了一个巨大的hash
+// 任何的读写操作都是在这个基于文件的hash上完成
 class DoorPlate  {
  public:
     explicit DoorPlate(const std::string& path);

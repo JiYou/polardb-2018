@@ -8,6 +8,7 @@
 
 namespace polar_race {
 
+// 
 struct Location {
   Location() : file_no(0), offset(0), len(0) {
   }

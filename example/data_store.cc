@@ -12,18 +12,21 @@ namespace polar_race {
 
 static const char kDataFilePrefix[] = "DATA_";
 static const int kDataFilePrefixLen = 5;
-static const int kSingleFileSize = 1024 * 1024 * 100;
+static const int kSingleFileSize = 1024 * 1024 * 100;  // 100MB
 
+// 生成特定的文件名
 static std::string FileName(const std::string &dir, uint32_t fileno) {
   return dir + "/" + kDataFilePrefix + std::to_string(fileno);
 }
 
 RetCode DataStore::Init() {
+  // 如果目录不存在，创建之
   if (!FileExists(dir_)
       && 0 != mkdir(dir_.c_str(), 0755)) {
     return kIOError;
   }
 
+  // 拿到所有的文件
   std::vector<std::string> files;
   if (0 != GetDirFiles(dir_, &files)) {
     return kIOError;
@@ -63,6 +66,7 @@ RetCode DataStore::Append(const std::string& value, Location* location) {
     return kInvalidArgument;
   }
 
+  // 如果超出当前正在写的文件的大小，那么这里直接生成一个新的文件
   if (next_location_.offset + value.size() > kSingleFileSize) {
     // Swtich to new file
     close(fd_);
@@ -84,12 +88,14 @@ RetCode DataStore::Append(const std::string& value, Location* location) {
 }
 
 RetCode DataStore::Read(const Location& l, std::string* value) {
+  // 这里直接定位到相应的文件，然后打开之.
   int fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY, 0644);
   if (fd < 0) {
     return kIOError;
   }
   lseek(fd, l.offset, SEEK_SET);
 
+  // 生成内存
   char* buf = new char[l.len]();
   char* pos = buf;
   uint32_t value_len = l.len;

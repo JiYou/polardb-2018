@@ -20,7 +20,20 @@
 namespace polar_race {
 // begin namespace polar_race
 
-class ValueInfo {
+// file.id, offset, length
+// max file size 4M,
+// length ~= 4K
+struct ValueInfo {
+  uint32_t file_id;
+  uint32_t offset;
+  // length include the
+  // struct item {
+  //    key_length;
+  //    val_length;
+  //    key;
+  //    value;
+  // }
+  uint32_t length;
 };
 
 // abstraction of hash class.
@@ -35,6 +48,7 @@ class Hash {
 
 // just one HashTree for a process.
 Hash *GetHashTree();
+Hash *GetHashMap();
 
 
 } // end namespace polar_race
