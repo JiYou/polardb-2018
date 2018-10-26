@@ -69,6 +69,7 @@ RetCode DataStore::Init() {
 
 RetCode DataStore::Append(const std::string& value, Location* location) {
   if (value.size() > kSingleFileSize) {
+    DEBUG << " invalid argument size" << value.size() << std::endl;
     return kInvalidArgument;
   }
 

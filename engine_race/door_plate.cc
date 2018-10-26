@@ -125,6 +125,7 @@ int DoorPlate::CalcIndex(const std::string& key) {
   // 如果已经到找到了最大位置处，失败
   if (jcnt == kMaxDoorCnt) {
     // full
+    DEBUG << "Can not find usable Index for item" << std::endl;
     return -1;
   }
   return index;
@@ -138,6 +139,7 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
 
   int index = CalcIndex(key);
   if (index < 0) {
+    DEBUG << " space is full " << std::endl;
     return kFull;
   }
 
@@ -147,7 +149,7 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
     // new item
     memcpy(iptr->key, key.data(), key.size());
     if (0 != msync(iptr->key, key.size(), MS_SYNC)) {
-      DEBUG << " msync failed " << std::endl;
+      DEBUG << " msync() failed " << std::endl;
       return kIOError;
     }
     iptr->key_size = key.size();
@@ -182,6 +184,7 @@ RetCode DoorPlate::GetRangeLocation(const std::string& lower,
         && (key < upper || upper.empty())) {
       locations->insert(std::pair<std::string, Location>(key, it->location));
       if (++count > kMaxRangeBufCount) {
+        DEBUG << " Out of Memory " << std::endl;
         return kOutOfMemory;
       }
     }
