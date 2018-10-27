@@ -53,11 +53,11 @@ EngineRace::~EngineRace() {
 }
 
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
-  if (key.size() != 8) {
+  if (key.size() != 8 || value.size() != 4096) {
     // check the key size.
     static bool have_find_larger_key = false;
     if (!have_find_larger_key) {
-      DEBUG << "[WARN] have find key size = " << key.size() << std::endl;
+      DEBUG << "[WARN] have find key size = " << key.size() << ":" << " value size = " << value.size() << std::endl;
       have_find_larger_key = true;
     }
     return kIOError;
