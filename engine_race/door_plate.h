@@ -3,6 +3,8 @@
 #define ENGINE_EXAMPLE_DOOR_PLATE_H_
 
 #include "include/engine.h"
+
+#include "engine_cache.h"
 #include "data_store.h"
 
 #include <fcntl.h>
@@ -43,6 +45,15 @@ class DoorPlate  {
         std::map<std::string, Location> *locations);
 
  private:
+    // LRUCache for item.
+    // record the content of key->item.
+    // decide to use enough items.
+    // each item is 28bytes.
+    // 28 * 1024 * 1024 ~= 28MB
+    // for this kind of cache, may use 512MB.
+    // for eache level, the capacity is 18MB
+    // So, the cache size = 18MB / 28 = 674K
+    LRUCache<Item> cache_;
     std::string dir_;
     int fd_;
     Item *items_;

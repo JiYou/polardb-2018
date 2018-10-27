@@ -42,7 +42,8 @@ static bool ItemTryPlace(const Item &item, const std::string& target) {
 DoorPlate::DoorPlate(const std::string& path)
   : dir_(path),
   fd_(-1),
-  items_(NULL) {
+  items_(NULL),
+  cache_(674000) {
 }
 
 RetCode DoorPlate::Init() {
