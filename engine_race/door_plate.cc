@@ -123,8 +123,9 @@ int DoorPlate::CalcIndex(const std::string& key) {
   // search in the cache.hash
   auto pos = pos_.find(index);
   if (pos != pos_.end()) {
-    index = pos->second + 1;
+    index = pos->second;
   }
+
   while (!ItemTryPlace(*(items_ + index), key)
       && ++jcnt < kMaxDoorCnt) {
     index = (index + 1) % kMaxDoorCnt;
@@ -132,7 +133,7 @@ int DoorPlate::CalcIndex(const std::string& key) {
 
   if (jcnt == kMaxDoorCnt) {
     // full
-    DEBUG << "Can not find usable Index for item" << std::endl;
+    DEBUG << "Can not find usable Index for item jcnt = " << jcnt << std::endl;
     return -1;
   } else {
     pos_[origin_index] = index;
@@ -180,7 +181,7 @@ RetCode DoorPlate::Find(const std::string& key, Location *location) {
   int index = CalcIndex(key);
   if (index < 0
       || !ItemKeyMatch(*(items_ + index), key)) {
-    DEBUG << " index < 0: " << (index < 0) << " KeyMatch() = " << (!ItemKeyMatch(*(items_ + index), key)) << std::endl;
+    DEBUG << " index < 0: " << (index < 0) << " KeyNotMatch() = " << (!ItemKeyMatch(*(items_ + index), key)) << std::endl;
     return kNotFound;
   }
 

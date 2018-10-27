@@ -60,7 +60,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
       DEBUG << "[WARN] have find key size = " << key.size() << ":" << " value size = " << value.size() << std::endl;
       have_find_larger_key = true;
     }
-    return kIOError;
   }
   pthread_mutex_lock(&mu_);
   Location location;

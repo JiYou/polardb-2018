@@ -19,7 +19,6 @@ public:
     printf("Visit %s --> %s\n", key.data(), value.data());
     (*key_cnt_)++;
   }
-  
 private:
   int* key_cnt_;
 };
@@ -45,7 +44,6 @@ int main() {
   std::string value;
   ret = engine->Read("aaa", &value);
   printf("Read aaa value: %s\n", value.c_str());
-  
   ret = engine->Read("bbb", &value);
   assert (ret == kSucc);
   printf("Read bbb value: %s\n", value.c_str());
@@ -55,9 +53,10 @@ int main() {
   ret = engine->Range("b", "", vistor);
   assert (ret == kSucc);
   printf("Range key cnt: %d\n", key_cnt);
-  
+
+  ret = engine->Read("xxxxxxxyyy", &value);
+  printf("[WARN]: can not find the item. ret = %d\n", ret);
 
   delete engine;
-
   return 0;
 }
