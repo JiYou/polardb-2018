@@ -118,16 +118,24 @@ int DoorPlate::CalcIndex(const std::string& key) {
   // 根据字符串取模
   // 得到相应的hash位置
   int index = StrHash(key.data(), key.size()) % kMaxDoorCnt;
+  const int origin_index = index;
+
+  // search in the cache.hash
+  auto pos = pos_.find(index);
+  if (pos != pos_.end()) {
+    index = pos->second + 1;
+  }
   while (!ItemTryPlace(*(items_ + index), key)
       && ++jcnt < kMaxDoorCnt) {
     index = (index + 1) % kMaxDoorCnt;
   }
 
-  // 如果已经到找到了最大位置处，失败
   if (jcnt == kMaxDoorCnt) {
     // full
     DEBUG << "Can not find usable Index for item" << std::endl;
     return -1;
+  } else {
+    pos_[origin_index] = index;
   }
   return index;
 }

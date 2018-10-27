@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <map>
 #include <string>
+#include <unordered_map>
 
 namespace polar_race {
 
@@ -45,6 +46,8 @@ class DoorPlate  {
     std::string dir_;
     int fd_;
     Item *items_;
+    // cache for position.
+    std::unordered_map<int, int> pos_;
 
     int CalcIndex(const std::string& key);
 };
