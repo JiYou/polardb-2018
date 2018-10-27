@@ -32,10 +32,39 @@ int main() {
 
   ret = engine->Write("aaa", "aaaaaaaaaaa");
   assert (ret == kSucc);
-  ret = engine->Write("aaa", "111111111111111111111111111111111111111111");
-  ret = engine->Write("aaa", "2222222");
-  ret = engine->Write("aaa", "33333333333333333333");
-  ret = engine->Write("aaa", "4");
+  ret = engine->Write("aab", "111111111111111111111111111111111111111111");
+  ret = engine->Write("aac", "2222222");
+  ret = engine->Write("aad", "33333333333333333333");
+  ret = engine->Write("aae", "4");
+  ret = engine->Write("aaf", "111111111111111111111111111111111111111111");
+  ret = engine->Write("aag", "111111111111111111111111111111111111111111");
+
+  ret = engine->Write("aah", "2222222");
+  ret = engine->Write("aai", "33333333333333333333");
+  ret = engine->Write("aaj", "4");
+
+  ret = engine->Write("aak", "111111111111111111111111111111111111111111");
+  ret = engine->Write("aal", "2222222");
+  ret = engine->Write("aam", "33333333333333333333");
+  ret = engine->Write("aan", "4");
+
+  ret = engine->Write("aao", "111111111111111111111111111111111111111111");
+  ret = engine->Write("aap", "2222222");
+  ret = engine->Write("aaq", "33333333333333333333");
+
+  ret = engine->Write("aar", "111111111111111111111111111111111111111111");
+  ret = engine->Write("aas", "2222222");
+  ret = engine->Write("aat", "33333333333333333333");
+  ret = engine->Write("aau", "4");
+
+
+  ret = engine->Write("aav", "111111111111111111111111111111111111111111");
+  ret = engine->Write("aay", "2222222");
+  ret = engine->Write("aaw", "33333333333333333333");
+  ret = engine->Write("aax", "4");
+  ret = engine->Write("aaz", "111111111111111111111111111111111111111111");
+
+
 
   ret = engine->Write("bbb", "bbbbbbbbbbbb");
   assert (ret == kSucc);
@@ -43,6 +72,22 @@ int main() {
   ret = engine->Write("ccd", "cbbbbbbbbbbbb");
   std::string value;
   ret = engine->Read("aaa", &value);
+
+  std::string x = "aa";
+  for (char i = 'a'; i <= 'd'; i++) {
+    auto k = x + i;
+    ret = engine->Read(k, &value);
+    printf("to find %s\n", k.c_str());
+    assert (ret == kSucc);
+  }
+
+  for (char i = 'a'; i <= 'z'; i++) {
+    auto k = x + i;
+    ret = engine->Read(k, &value);
+    printf("to find %s\n", k.c_str());
+    assert (ret == kSucc);
+  }
+
   printf("Read aaa value: %s\n", value.c_str());
   ret = engine->Read("bbb", &value);
   assert (ret == kSucc);

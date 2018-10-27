@@ -16,6 +16,9 @@
 
 namespace polar_race {
 
+// actually this is for single list.
+// there are 2 list in the cache.
+static constexpr int32_t kMaxCacheCnt = 4; // 674000;
 static const uint64_t kMaxDoorCnt = 1024 * 1024 * 52;
 static const char kMetaFileName[] = "META";
 static const int64_t kMaxRangeBufCount = kMaxDoorCnt;
@@ -42,8 +45,8 @@ static bool ItemTryPlace(const Item &item, const std::string& target) {
 DoorPlate::DoorPlate(const std::string& path)
   : dir_(path),
   fd_(-1),
-  items_(NULL),
-  cache_(674000) {
+  cache_(kMaxCacheCnt),
+  items_(NULL) {
 }
 
 RetCode DoorPlate::Init() {
@@ -160,26 +163,41 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
   if (iptr->in_use == 0) {
     // new item
     memcpy(iptr->key, key.data(), key.size());
-    // if use msync, we need to check the page size.
-    // the content may across several pages.
-    void *origin_addr = reinterpret_cast<void*>(iptr->key);
-    uint64_t mod {4095};
-    mod = ~mod;
-    auto align_addr = reinterpret_cast<void*>(reinterpret_cast<uint64_t>(origin_addr) & (~4095));
-    auto left = reinterpret_cast<size_t>(iptr->key) & 4095;
-    if (0 != msync(align_addr, left + key.size(), MS_SYNC)) {
-      DEBUG << "errno = " << strerror(errno) << std::endl;
-      DEBUG << " msync() failed " << std::endl;
-      return kIOError;
-    }
     iptr->key_size = key.size();
     iptr->in_use = 1;  // Place
   }
   iptr->location = l;
+
+  // if use msync, we need to check the page size.
+  // the content may across several pages.
+  void *origin_addr = reinterpret_cast<void*>(iptr->key);
+  uint64_t mod {4095};
+  mod = ~mod;
+  auto align_addr = reinterpret_cast<void*>(reinterpret_cast<uint64_t>(origin_addr) & (~4095));
+  auto left = reinterpret_cast<size_t>(iptr->key) & 4095;
+  if (0 != msync(align_addr, left + key.size(), MS_SYNC)) {
+    DEBUG << "errno = " << strerror(errno) << std::endl;
+    DEBUG << " msync() failed " << std::endl;
+    return kIOError;
+  }
+
+  // find and updte the cache.
+  // put the item into cache.
+  cache_.FindThenUpdate(PolarString(key.data(), key.size()), l);
+
   return kSucc;
 }
 
 RetCode DoorPlate::Find(const std::string& key, Location *location) {
+  // try to find localtion in cache.
+  Location pos;
+  auto ret = cache_.Get(PolarString(key.data(), key.size()), &pos);
+  // if cache hit.
+  if (ret == kSucc) {
+    *location = pos;
+    return kSucc;
+  }
+
   int index = CalcIndex(key, false /*just for read*/);
   if (index < 0
       || !ItemKeyMatch(*(items_ + index), key)) {
@@ -188,6 +206,7 @@ RetCode DoorPlate::Find(const std::string& key, Location *location) {
   }
 
   *location = (items_ + index)->location;
+  cache_.Put(PolarString(key.data(), key.size()), *location);
   return kSucc;
 }
 

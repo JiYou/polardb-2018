@@ -45,6 +45,12 @@ class DoorPlate  {
         std::map<std::string, Location> *locations);
 
  private:
+    std::string dir_;
+    int fd_;
+    LRUCache<Location> cache_;
+    Item *items_;
+    // cache for position.
+    std::unordered_map<int, int> pos_;
     // LRUCache for item.
     // record the content of key->item.
     // decide to use enough items.
@@ -53,12 +59,6 @@ class DoorPlate  {
     // for this kind of cache, may use 512MB.
     // for eache level, the capacity is 18MB
     // So, the cache size = 18MB / 28 = 674K
-    LRUCache<Item> cache_;
-    std::string dir_;
-    int fd_;
-    Item *items_;
-    // cache for position.
-    std::unordered_map<int, int> pos_;
 
     int CalcIndex(const std::string& key, bool is_write);
 };
