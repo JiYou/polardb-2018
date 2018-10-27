@@ -25,17 +25,17 @@ namespace polar_race {
 // begin of polar_race
 
 // item in the cache.
-template<typename Value>
+template<typename Key, typename Value>
 struct CacheNode {
     typedef typename std::list<CacheNode<Value>*>::iterator list_iter_;
     typedef std::pair<list_iter_, bool/*second_list?*/> value_type_;
-    typename std::unordered_map<PolarString, value_type_>::iterator pos_;
+    typename std::unordered_map<Key, value_type_>::iterator pos_;
     Value val_;
 };
 
 
 // 2 Queue LRU
-template<typename Value>
+template<typename Key, typename Value>
 class LRUCache {
   public:
     LRUCache(int cap) {
@@ -52,7 +52,7 @@ class LRUCache {
         DEBUG << "Free space over" << std::endl;
     }
 
-    RetCode FindThenUpdate(const PolarString &key, const Value &val) {
+    RetCode FindThenUpdate(const Key &key, const Value &val) {
       // if not foud, skip
       std::unique_lock<std::mutex> l(lock_);
       auto pos = hash_.find(key);
@@ -67,7 +67,7 @@ class LRUCache {
       return kSucc;
     }
 
-    RetCode Get(const PolarString &key, Value *val) {
+    RetCode Get(const Key &key, Value *val) {
         std::unique_lock<std::mutex> l(lock_);
         // try to find it in the hash.
         auto pos = hash_.find(key);
@@ -106,7 +106,7 @@ class LRUCache {
         return kSucc;
     }
 
-    RetCode Put(const PolarString &key, const Value &val) {
+    RetCode Put(const Key &key, const Value &val) {
         std::unique_lock<std::mutex> l(lock_);
 
         auto pos = hash_.find(key);
@@ -154,7 +154,7 @@ class LRUCache {
 
     typedef typename std::list<CacheNode<Value>*>::iterator list_iter_;
     typedef std::pair<list_iter_ /*list_position*/, bool/*second_list?*/> value_type_;
-    std::unordered_map<PolarString, value_type_> hash_;
+    std::unordered_map<Key, value_type_> hash_;
 };
 
 
