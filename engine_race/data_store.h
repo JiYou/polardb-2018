@@ -1,14 +1,15 @@
-// Copyright [2018] Alibaba Cloud All rights reserved
-#ifndef ENGINE_SIMPLE_DATA_STORE_H_
-#define ENGINE_SIMPLE_DATA_STORE_H_
+#pragma once
+
+
+#include "include/engine.h"
+#include "engine_race/engine_cache.h"
 #include <string.h>
 #include <unistd.h>
+
 #include <string>
-#include "include/engine.h"
 
 namespace polar_race {
 
-// 
 struct Location {
   Location() : file_no(0), offset(0), len(0) {
   }
@@ -41,4 +42,3 @@ class DataStore  {
 };
 
 }  // namespace polar_race
-#endif  // ENGINE_SIMPLE_DATA_STORE_H_
