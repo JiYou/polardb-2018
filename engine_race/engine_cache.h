@@ -25,17 +25,17 @@ namespace polar_race {
 // begin of polar_race
 
 // item in the cache.
-template<typename T>
+template<typename Value>
 struct CacheNode {
-    typedef typename std::list<CacheNode<T>*>::iterator list_iter_;
+    typedef typename std::list<CacheNode<Value>*>::iterator list_iter_;
     typedef std::pair<list_iter_, bool/*second_list?*/> value_type_;
     typename std::unordered_map<PolarString, value_type_>::iterator pos_;
-    T val_;
+    Value val_;
 };
 
 
 // 2 Queue LRU
-template<typename T>
+template<typename Value>
 class LRUCache {
   public:
     LRUCache(int cap) {
@@ -52,7 +52,7 @@ class LRUCache {
         DEBUG << "Free space over" << std::endl;
     }
 
-    RetCode FindThenUpdate(const PolarString &key, const T &val) {
+    RetCode FindThenUpdate(const PolarString &key, const Value &val) {
       // if not foud, skip
       std::unique_lock<std::mutex> l(lock_);
       auto pos = hash_.find(key);
@@ -62,12 +62,12 @@ class LRUCache {
 
       auto iter = pos->second.first;
       // get the right ptr.
-      CacheNode<T> *ptr = *iter;
+      CacheNode<Value> *ptr = *iter;
       ptr->val_ = val;
       return kSucc;
     }
 
-    RetCode Get(const PolarString &key, T *val) {
+    RetCode Get(const PolarString &key, Value *val) {
         std::unique_lock<std::mutex> l(lock_);
         // try to find it in the hash.
         auto pos = hash_.find(key);
@@ -81,7 +81,7 @@ class LRUCache {
         auto iter = pos->second.first;
         bool is_second_list = pos->second.second;
         // get the right ptr.
-        CacheNode<T> *ptr = *iter;
+        CacheNode<Value> *ptr = *iter;
 
         if (is_second_list) {
             second_list_.erase(iter);
@@ -106,18 +106,18 @@ class LRUCache {
         return kSucc;
     }
 
-    RetCode Put(const PolarString &key, const T &val) {
+    RetCode Put(const PolarString &key, const Value &val) {
         std::unique_lock<std::mutex> l(lock_);
 
         auto pos = hash_.find(key);
         if (pos != hash_.end()) {
             // find it, check the value.
             auto iter = pos->second.first;
-            CacheNode<T> *ptr = *iter;
+            CacheNode<Value> *ptr = *iter;
             // if find it, put to second list.
             ptr->val_ = val;
         } else {
-            CacheNode<T> *ptr = new CacheNode<T>;
+            CacheNode<Value> *ptr = new CacheNode<Value>;
             ptr->val_ = val;
             first_list_.emplace_back(ptr);
             // update the hash_map;
@@ -129,9 +129,9 @@ class LRUCache {
             ptr->pos_ = ret.first;
         }
 
-        auto resize_list = [&](std::list<CacheNode<T>*> &l) {
+        auto resize_list = [&](std::list<CacheNode<Value>*> &l) {
             while (l.size() > static_cast<size_t>(cap_)) {
-                polar_race::CacheNode<T> *ptr = l.front();
+                polar_race::CacheNode<Value> *ptr = l.front();
                 l.erase(l.begin());
                 hash_.erase(ptr->pos_);
                 delete ptr;
@@ -149,10 +149,10 @@ class LRUCache {
 
     std::mutex lock_;
     // just record the pointers.
-    std::list<CacheNode<T>*> first_list_;
-    std::list<CacheNode<T>*> second_list_;
+    std::list<CacheNode<Value>*> first_list_;
+    std::list<CacheNode<Value>*> second_list_;
 
-    typedef typename std::list<CacheNode<T>*>::iterator list_iter_;
+    typedef typename std::list<CacheNode<Value>*>::iterator list_iter_;
     typedef std::pair<list_iter_ /*list_position*/, bool/*second_list?*/> value_type_;
     std::unordered_map<PolarString, value_type_> hash_;
 };
