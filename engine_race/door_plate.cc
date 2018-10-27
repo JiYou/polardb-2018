@@ -183,7 +183,7 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
 
   // find and updte the cache.
   // put the item into cache.
-  cache_.FindThenUpdate(PolarString(key.data(), key.size()), l);
+  cache_.FindThenUpdate(key, l);
 
   return kSucc;
 }
@@ -191,7 +191,7 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
 RetCode DoorPlate::Find(const std::string& key, Location *location) {
   // try to find localtion in cache.
   Location pos;
-  auto ret = cache_.Get(PolarString(key.data(), key.size()), &pos);
+  auto ret = cache_.Get(key, &pos);
   // if cache hit.
   if (ret == kSucc) {
     *location = pos;
@@ -206,7 +206,7 @@ RetCode DoorPlate::Find(const std::string& key, Location *location) {
   }
 
   *location = (items_ + index)->location;
-  cache_.Put(PolarString(key.data(), key.size()), *location);
+  cache_.Put(key, *location);
   return kSucc;
 }
 

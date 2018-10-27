@@ -27,7 +27,7 @@ namespace polar_race {
 // item in the cache.
 template<typename Key, typename Value>
 struct CacheNode {
-    typedef typename std::list<CacheNode<Value>*>::iterator list_iter_;
+    typedef typename std::list<CacheNode<Key, Value>*>::iterator list_iter_;
     typedef std::pair<list_iter_, bool/*second_list?*/> value_type_;
     typename std::unordered_map<Key, value_type_>::iterator pos_;
     Value val_;
@@ -62,7 +62,7 @@ class LRUCache {
 
       auto iter = pos->second.first;
       // get the right ptr.
-      CacheNode<Value> *ptr = *iter;
+      CacheNode<Key, Value> *ptr = *iter;
       ptr->val_ = val;
       return kSucc;
     }
@@ -81,7 +81,7 @@ class LRUCache {
         auto iter = pos->second.first;
         bool is_second_list = pos->second.second;
         // get the right ptr.
-        CacheNode<Value> *ptr = *iter;
+        CacheNode<Key, Value> *ptr = *iter;
 
         if (is_second_list) {
             second_list_.erase(iter);
@@ -113,11 +113,11 @@ class LRUCache {
         if (pos != hash_.end()) {
             // find it, check the value.
             auto iter = pos->second.first;
-            CacheNode<Value> *ptr = *iter;
+            CacheNode<Key, Value> *ptr = *iter;
             // if find it, put to second list.
             ptr->val_ = val;
         } else {
-            CacheNode<Value> *ptr = new CacheNode<Value>;
+            CacheNode<Key, Value> *ptr = new CacheNode<Key, Value>;
             ptr->val_ = val;
             first_list_.emplace_back(ptr);
             // update the hash_map;
@@ -129,9 +129,9 @@ class LRUCache {
             ptr->pos_ = ret.first;
         }
 
-        auto resize_list = [&](std::list<CacheNode<Value>*> &l) {
+        auto resize_list = [&](std::list<CacheNode<Key, Value>*> &l) {
             while (l.size() > static_cast<size_t>(cap_)) {
-                polar_race::CacheNode<Value> *ptr = l.front();
+                polar_race::CacheNode<Key, Value> *ptr = l.front();
                 l.erase(l.begin());
                 hash_.erase(ptr->pos_);
                 delete ptr;
@@ -149,10 +149,10 @@ class LRUCache {
 
     std::mutex lock_;
     // just record the pointers.
-    std::list<CacheNode<Value>*> first_list_;
-    std::list<CacheNode<Value>*> second_list_;
+    std::list<CacheNode<Key, Value>*> first_list_;
+    std::list<CacheNode<Key, Value>*> second_list_;
 
-    typedef typename std::list<CacheNode<Value>*>::iterator list_iter_;
+    typedef typename std::list<CacheNode<Key, Value>*>::iterator list_iter_;
     typedef std::pair<list_iter_ /*list_position*/, bool/*second_list?*/> value_type_;
     std::unordered_map<Key, value_type_> hash_;
 };

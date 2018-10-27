@@ -47,7 +47,7 @@ class DoorPlate  {
  private:
     std::string dir_;
     int fd_;
-    LRUCache<Location> cache_;
+    LRUCache<std::string, Location> cache_;
     Item *items_;
     // cache for position.
     std::unordered_map<int, int> pos_;
