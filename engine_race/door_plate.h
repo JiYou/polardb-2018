@@ -49,7 +49,7 @@ class DoorPlate  {
     // cache for position.
     std::unordered_map<int, int> pos_;
 
-    int CalcIndex(const std::string& key);
+    int CalcIndex(const std::string& key, bool is_write);
 };
 
 }  // namespace polar_race

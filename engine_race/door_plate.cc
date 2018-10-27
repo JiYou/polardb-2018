@@ -113,7 +113,7 @@ DoorPlate::~DoorPlate() {
 
 // Very easy hash table, which deal conflict only by try the next one
 // 这里只是计算出可用的index的位置
-int DoorPlate::CalcIndex(const std::string& key) {
+int DoorPlate::CalcIndex(const std::string& key, bool is_write) {
   uint32_t jcnt = 0;
   // 根据字符串取模
   // 得到相应的hash位置
@@ -135,7 +135,8 @@ int DoorPlate::CalcIndex(const std::string& key) {
     // full
     DEBUG << "Can not find usable Index for item jcnt = " << jcnt << std::endl;
     return -1;
-  } else {
+  // if is write, then the index is taken.
+  } else if (is_write) {
     pos_[origin_index] = index;
   }
   return index;
@@ -147,7 +148,7 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
     return kInvalidArgument;
   }
 
-  int index = CalcIndex(key);
+  int index = CalcIndex(key, true /*is_write*/);
   if (index < 0) {
     DEBUG << " space is full " << std::endl;
     return kFull;
@@ -178,7 +179,7 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
 }
 
 RetCode DoorPlate::Find(const std::string& key, Location *location) {
-  int index = CalcIndex(key);
+  int index = CalcIndex(key, false /*just for read*/);
   if (index < 0
       || !ItemKeyMatch(*(items_ + index), key)) {
     DEBUG << " index < 0: " << (index < 0) << " KeyNotMatch() = " << (!ItemKeyMatch(*(items_ + index), key)) << std::endl;
