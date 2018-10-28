@@ -175,7 +175,7 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
   mod = ~mod;
   auto align_addr = reinterpret_cast<void*>(reinterpret_cast<uint64_t>(origin_addr) & (~4095));
   auto left = reinterpret_cast<size_t>(iptr->key) & 4095;
-  if (0 != msync(align_addr, left + key.size(), MS_SYNC)) {
+  if (0 != msync(align_addr, left + sizeof(Item), MS_SYNC)) {
     DEBUG << "errno = " << strerror(errno) << std::endl;
     DEBUG << " msync() failed " << std::endl;
     return kIOError;
