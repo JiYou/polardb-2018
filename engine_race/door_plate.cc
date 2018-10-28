@@ -19,7 +19,11 @@ namespace polar_race {
 // actually this is for single list.
 // there are 2 list in the cache.
 static constexpr int32_t kMaxCacheCnt = 9 * 1024 * 1024; // ~= 9*2*28MB ~= totaly 512MB
-static const uint64_t kMaxDoorCnt = 1024 * 1024 * 52;
+
+// max index count. origin size = 32M * 52byte.
+
+static const uint64_t kHashPrimeNumber = 85983083; // near to 82m
+static const uint64_t kMaxDoorCnt = 1024 * 1024 * 82;
 static const char kMetaFileName[] = "META";
 static const int64_t kMaxRangeBufCount = kMaxDoorCnt;
 
@@ -123,7 +127,7 @@ int DoorPlate::CalcIndex(const std::string& key, bool is_write) {
   uint32_t jcnt = 0;
   // 根据字符串取模
   // 得到相应的hash位置
-  int index = StrHash(key.data(), key.size()) % kMaxDoorCnt;
+  int index = StrHash(key.data(), key.size()) % kHashPrimeNumber;
   const int origin_index = index;
 
   // search in the cache.hash

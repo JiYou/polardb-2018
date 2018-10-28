@@ -13,9 +13,9 @@ namespace polar_race {
 struct Location {
   Location() : file_no(0), offset(0), len(0) {
   }
-  uint32_t file_no;
+  uint16_t file_no;
   uint32_t offset;
-  uint32_t len;
+  uint16_t len;
 };
 
 inline bool operator==(const Location &l, const Location& r) {
