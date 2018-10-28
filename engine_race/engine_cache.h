@@ -92,17 +92,12 @@ class LRUCache {
         // put the ptr into the second list.
         second_list_.emplace_back(ptr);
         // update the hash_map.
-        // first emplace.
-        //auto ret = hash_.emplace(std::piecewise_construct,
-        //                         std::forward_as_tuple(key),
-        //                         std::forward_as_tuple(second_list_.back(), true));
-        value_type_ v(std::prev(second_list_.end()), true);
-        auto ret = hash_.emplace(key, v);
-        ptr->pos_ = ret.first;
-
+        // update value.list_iter_
+        pos->second.first = std::prev(second_list_.end());
+        // has been put to second_list_
+        pos->second.second = true;
         // the assign the value.
         *val = ptr->val_;
-
         return kSucc;
     }
 
@@ -114,16 +109,12 @@ class LRUCache {
             // find it, check the value.
             auto iter = pos->second.first;
             CacheNode<Key, Value> *ptr = *iter;
-            // if find it, put to second list.
+            // if find it, update the value.
             ptr->val_ = val;
         } else {
             CacheNode<Key, Value> *ptr = new CacheNode<Key, Value>;
             ptr->val_ = val;
             first_list_.emplace_back(ptr);
-            // update the hash_map;
-            //auto ret = hash_.emplace(std::piecewise_construct,
-            //                     std::forward_as_tuple(key),
-            //                     std::forward_as_tuple(first_list_.back(), true));
             value_type_ v(std::prev(first_list_.end()), false);
             auto ret = hash_.emplace(key, v);
             ptr->pos_ = ret.first;

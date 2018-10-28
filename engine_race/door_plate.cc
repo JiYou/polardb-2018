@@ -18,7 +18,7 @@ namespace polar_race {
 
 // actually this is for single list.
 // there are 2 list in the cache.
-static constexpr int32_t kMaxCacheCnt = 4; // 674000;
+static constexpr int32_t kMaxCacheCnt = 67400; // 674000;
 static const uint64_t kMaxDoorCnt = 1024 * 1024 * 52;
 static const char kMetaFileName[] = "META";
 static const int64_t kMaxRangeBufCount = kMaxDoorCnt;
