@@ -18,7 +18,7 @@ namespace polar_race {
 
 // actually this is for single list.
 // there are 2 list in the cache.
-static constexpr int32_t kMaxCacheCnt = 67400; // 674000;
+static constexpr int32_t kMaxCacheCnt = 9 * 1024 * 1024; // ~= 9*2*28MB ~= totaly 512MB
 static const uint64_t kMaxDoorCnt = 1024 * 1024 * 52;
 static const char kMetaFileName[] = "META";
 static const int64_t kMaxRangeBufCount = kMaxDoorCnt;
@@ -34,6 +34,8 @@ static bool ItemKeyMatch(const Item &item, const std::string& target) {
 }
 
 // can use this item place
+// true: this place is empty, taken it.
+// false, this place has been taken by other.
 static bool ItemTryPlace(const Item &item, const std::string& target) {
   if (item.in_use == 0) {
     return true;
@@ -130,9 +132,21 @@ int DoorPlate::CalcIndex(const std::string& key, bool is_write) {
     index = pos->second;
   }
 
+  int steps = 0;
+  static int scan_times = 0;
+  scan_times += !is_write;
+  //  while (used_by_ohter && can_move_on) {
+  //     move_forward;
+  //  }
   while (!ItemTryPlace(*(items_ + index), key)
       && ++jcnt < kMaxDoorCnt) {
     index = (index + 1) % kMaxDoorCnt;
+    ++steps;
+  }
+
+  if (!is_write) {
+    if (scan_times % (100000) == 0)
+    DEBUG << "walked steps = "  << steps << std::endl;
   }
 
   if (jcnt == kMaxDoorCnt) {

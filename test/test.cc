@@ -77,7 +77,6 @@ int main() {
   for (char i = 'a'; i <= 'd'; i++) {
     auto k = x + i;
     ret = engine->Read(k, &value);
-    printf("to find %s\n", k.c_str());
     assert (ret == kSucc);
   }
 

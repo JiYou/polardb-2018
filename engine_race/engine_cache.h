@@ -2,7 +2,6 @@
 
 #include "engine_race/util.h"
 #include "include/engine.h"
-#include "include/polar_string.h"
 #include <mutex>
 #include <list>
 #include <unordered_map>

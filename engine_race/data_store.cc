@@ -14,6 +14,7 @@
 
 namespace polar_race {
 
+//static constexpr int kMaxDataCacheCnt = 160 * 1024 * 1024; // this is for single list.
 static const char kDataFilePrefix[] = "DATA_";
 static const int kDataFilePrefixLen = 5;
 static const int kSingleFileSize = 1024 * 1024 * 100;  // 100MB
@@ -67,6 +68,7 @@ RetCode DataStore::Init() {
   return OpenCurFile();
 }
 
+// because shere just use append, so no need to update the LRUCache.
 RetCode DataStore::Append(const std::string& value, Location* location) {
   if (value.size() > kSingleFileSize) {
     DEBUG << " invalid argument size" << value.size() << std::endl;
@@ -98,6 +100,12 @@ RetCode DataStore::Append(const std::string& value, Location* location) {
 }
 
 RetCode DataStore::Read(const Location& l, std::string* value) {
+  // try to find the location in cache.
+  auto is_find = cache_.Get(l, value);
+  if (is_find == kSucc) {
+    return kSucc;
+  }
+
   // 这里直接定位到相应的文件，然后打开之.
   int fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY, 0644);
   if (fd < 0) {
@@ -124,6 +132,9 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
     value_len -= r;
   }
   *value = std::string(buf, l.len);
+
+  // if not find,  then put it into cache.
+  cache_.Put(l, *value);
 
   delete [] buf;
   close(fd);

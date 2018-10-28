@@ -23,8 +23,8 @@ struct Item {
   }
   Location location;      // 位置
   char key[kMaxKeyLen];   // key
-  uint32_t key_size;      // key_size
-  uint8_t in_use;         // 这个item是否被使用
+  uint8_t key_size;      // key_size
+  uint8_t in_use;        // 这个item是否被使用
 };
 
 // Hash index for key

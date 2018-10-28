@@ -1,10 +1,9 @@
 // Copyright [2018] Alibaba Cloud All rights reserved
-#ifndef INCLUDE_POLAR_STRING_H_
-#define INCLUDE_POLAR_STRING_H_
+#pragma once
 
 #include <string.h>
 #include <string>
-
+#include <unordered_map>
 
 namespace polar_race {
 
@@ -83,4 +82,3 @@ inline int PolarString::compare(const PolarString& b) const {
 
 }  // namespace polar_race
 
-#endif  // INCLUDE_POLAR_STRING_H_
