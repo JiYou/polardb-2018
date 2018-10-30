@@ -42,7 +42,7 @@ namespace polar_race {
 class DataStore  {
  public:
   explicit DataStore(const std::string dir)
-    : fd_(-1), dir_(dir), cache_(160*1024*1024) {}
+    : fd_(-1), dir_(dir)/*, cache_(160*1024*1024)*/ {}
 
   ~DataStore() {
     if (fd_ > 0) {
@@ -69,7 +69,7 @@ class DataStore  {
   // 128K*2*4K = 1G
   // for some free memory, here set 160K
   // 160K * 8K ~= 1.28G
-  LRUCache<Location, std::string> cache_;
+  //LRUCache<Location, std::string> cache_;
   RetCode OpenCurFile();
 };
 

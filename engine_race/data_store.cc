@@ -101,10 +101,10 @@ RetCode DataStore::Append(const std::string& value, Location* location) {
 
 RetCode DataStore::Read(const Location& l, std::string* value) {
   // try to find the location in cache.
-  auto is_find = cache_.Get(l, value);
-  if (is_find == kSucc) {
-    return kSucc;
-  }
+  //auto is_find = cache_.Get(l, value);
+  //if (is_find == kSucc) {
+  //  return kSucc;
+  //}
 
   // 这里直接定位到相应的文件，然后打开之.
   int fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY, 0644);
@@ -134,7 +134,7 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
   *value = std::string(buf, l.len);
 
   // if not find,  then put it into cache.
-  cache_.Put(l, *value);
+  //cache_.Put(l, *value);
 
   delete [] buf;
   close(fd);
