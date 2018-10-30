@@ -32,7 +32,7 @@ struct write_item {
   const PolarString *key = nullptr;
   const PolarString *value = nullptr;
 
-  int ret_code = 1;
+  RetCode ret_code = kSucc;
   bool is_done = false;
   std::mutex lock_;
   std::condition_variable cond_;
@@ -44,13 +44,6 @@ struct write_item {
   void wait_done() {
     std::unique_lock<std::mutex> l(lock_);
     cond_.wait(l, [&] { return is_done; } );
-  }
-
-  void set_ret_code(int ret_code) {
-    std::unique_lock<std::mutex> l(lock_);
-    is_done = true;
-    this->ret_code = ret_code;
-    cond_.notify_all();
   }
 };
 
@@ -122,6 +115,7 @@ class EngineRace : public Engine  {
 
  private:
   void run();
+  void start();
 
  private:
   pthread_mutex_t mu_;

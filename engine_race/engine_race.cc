@@ -42,30 +42,40 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
     return kIOError;
   }
 
+  engine_race->start();
   *eptr = engine_race;
+
   return kSucc;
 }
 
 EngineRace::~EngineRace() {
+  stop_ = true;
   if (db_lock_) {
     UnlockFile(db_lock_);
   }
 }
 
 void EngineRace::run() {
+  int64_t cnt = 0;
   std::vector<write_item*> vs;
   DEBUG << "db::run()" << std::endl;
   while (!stop_) {
     q_.Pop(&vs);
-    std::cout << "vs.size() = " << vs.size() << std::endl;
+    cnt ++;
+
+    if (cnt % 1000 == 0)
+      std::cout << "vs.size() = " << vs.size() << std::endl;
     for (auto &x: vs) {
       std::unique_lock<std::mutex> l(x->lock_);
       {
         pthread_mutex_lock(&mu_);
-        // TODO
-        // firstly, write the value into -> log
-        // secondly, update the key-ops.
-        // hash_[*(x->key)] = *(x->value);
+        Location location;
+        // firstly, write the file content.
+        RetCode ret = store_.Append((x->value)->ToString(), &location);
+        if (ret == kSucc) {
+          // then write the <key,pos> into hash map.
+          ret = plate_.AddOrUpdate((x->key)->ToString(), location);
+        }
         pthread_mutex_unlock(&mu_);
       }
       x->is_done = true;
@@ -73,6 +83,11 @@ void EngineRace::run() {
       x->cond_.notify_all();
     }
   }
+}
+
+void EngineRace::start() {
+  std::thread thd(&EngineRace::run, this);
+  thd.detach();
 }
 
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
@@ -84,16 +99,14 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
       have_find_larger_key = true;
     }
   }
-  pthread_mutex_lock(&mu_);
-  Location location;
-  // firstly, write the file content.
-  RetCode ret = store_.Append(value.ToString(), &location);
-  if (ret == kSucc) {
-    // then write the <key,pos> into hash map.
-    ret = plate_.AddOrUpdate(key.ToString(), location);
-  }
-  pthread_mutex_unlock(&mu_);
-  return ret;
+
+  write_item w(&key, &value);
+  q_.Push(&w);
+
+  // wait the request writen to disk.
+  std::unique_lock<std::mutex> l(w.lock_);
+  w.cond_.wait(l, [&w] { return w.is_done; });
+  return w.ret_code;
 }
 
 RetCode EngineRace::Read(const PolarString& key, std::string* value) {

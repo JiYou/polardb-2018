@@ -3,40 +3,30 @@
 #include <stdio.h>
 #include <string>
 #include <iostream>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <thread>
 
 static const char kEnginePath[] = "/tmp/test_engine";
 static const char kDumpPath[] = "/tmp/test_dump";
 
 using namespace polar_race;
 
-class DumpVisitor : public Visitor {
-public:
-  DumpVisitor(int* kcnt)
-    : key_cnt_(kcnt) {}
+static constexpr int kMaxThread = 64;
+static constexpr int kMaxCnt = 2176520 / kMaxThread;
 
-  ~DumpVisitor() {}
+static std::mutex mu;
+static std::condition_variable cond;
+static std::atomic<int> write_cnt {0};
 
-  void Visit(const PolarString& key, const PolarString& value) {
-    printf("Visit %s --> %s\n", key.data(), value.data());
-    (*key_cnt_)++;
-  }
-private:
-  int* key_cnt_;
-};
-
-int main() {
-  Engine *engine = NULL;
-
-  RetCode ret = Engine::Open(kEnginePath, &engine);
-  assert (ret == kSucc);
-
-
+void write_thread(Engine *engine, char begin_char) {
+  int cnt = 0;
   char V[4096];
   memset(V, 'a', sizeof(V));
 
-  int cnt = 0;
-  constexpr int kMaxCnt = 2176520;
-  std::string front = "a";
+  std::string front;
+  front += begin_char;
   for (char i = 'a'; i < 'z'; i++) {
     std::string A = front + i;
     for (char j = 'a'; j < 'z'; j++) {
@@ -51,8 +41,12 @@ int main() {
               std::string F = E + n;
               for (char o = 'a'; o < 'z'; o++) {
                 cnt ++;
-                // 2176525
-                if (cnt > kMaxCnt) return 0;
+                if (cnt > kMaxCnt) {
+                  std::unique_lock<std::mutex> l(mu);
+                  write_cnt++;
+                  cond.notify_all();
+                  return;
+                }
                 if (cnt % 1000 == 0) std::cout << "cnt = " << cnt << std::endl;
                 std::string G = F + o;
                 auto ret = engine->Write(G, std::string(V, 4096));
@@ -79,38 +73,31 @@ int main() {
       }
     }
   }
+}
 
-  ret = engine->Write("bbb", "bbbbbbbbbbbb");
+int main() {
+  Engine *engine = NULL;
+
+  RetCode ret = Engine::Open(kEnginePath, &engine);
   assert (ret == kSucc);
 
-  ret = engine->Write("ccd", "cbbbbbbbbbbbb");
+
+  static const char alphanum[] =
+        "0123456789"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz"
+        "~`!@#$%^&*()_+=-,./;:<>";
+
+  for (int i = 0; i < kMaxThread; i++) {
+    auto front_char = alphanum[i];
+    std::thread thd(write_thread, engine, front_char);
+    thd.detach();
+  }
+
+  std::unique_lock<std::mutex> l(mu);
+  cond.wait(l, [&] { return write_cnt == kMaxThread; });
+
   std::string value;
-  ret = engine->Read("aaa", &value);
-
-  std::string x = "aa";
-  for (char i = 'a'; i <= 'd'; i++) {
-    auto k = x + i;
-    ret = engine->Read(k, &value);
-    assert (ret == kSucc);
-  }
-
-  for (char i = 'a'; i <= 'z'; i++) {
-    auto k = x + i;
-    ret = engine->Read(k, &value);
-    assert (ret == kSucc);
-  }
-
-  printf("Read aaa value: %s\n", value.c_str());
-  ret = engine->Read("bbb", &value);
-  assert (ret == kSucc);
-  printf("Read bbb value: %s\n", value.c_str());
-
-  int key_cnt = 0;
-  DumpVisitor vistor(&key_cnt);
-  ret = engine->Range("b", "", vistor);
-  assert (ret == kSucc);
-  printf("Range key cnt: %d\n", key_cnt);
-
   ret = engine->Read("xxxxxxxyyy", &value);
   printf("[WARN]: can not find the item. ret = %d\n", ret);
 
