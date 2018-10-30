@@ -76,7 +76,6 @@ void EngineRace::run() {
       if (ret == kSucc) {
         ret = plate_.Append((x->key)->ToString(), location);
       }
-      x->is_done = true;
       x->ret_code = kSucc;
     }
 
@@ -88,11 +87,13 @@ void EngineRace::run() {
 
     // if sync failed, change the ret code
     // when previous set success.
-    if (ret != kSucc) {
-      for (auto &x: vs) {
-        if (x->ret_code == kSucc) {
-          x->ret_code = ret;
-        }
+    for (auto &x: vs) {
+      if (ret != kSucc && x->ret_code == kSucc) {
+        x->ret_code = ret;
+      }
+      {
+        std::unique_lock<std::mutex> l(x->lock_);
+        x->is_done = true;
         x->cond_.notify_all();
       }
     }
