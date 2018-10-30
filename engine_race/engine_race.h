@@ -7,6 +7,18 @@
 #include "engine_race/door_plate.h"
 #include "engine_race/data_store.h"
 
+#include <assert.h>
+#include <stdint.h>
+
+#include <chrono>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <iostream>
+#include <deque>
+#include <vector>
+#include <atomic>
+
 #include <pthread.h>
 #include <string>
 #include <queue>
@@ -14,13 +26,86 @@
 
 namespace polar_race {
 
+static constexpr size_t kMaxQueueSize = 4096; // 4K * 4Kitem ~= 16MB
+
+struct write_item {
+  const PolarString *key = nullptr;
+  const PolarString *value = nullptr;
+
+  int ret_code = 1;
+  bool is_done = false;
+  std::mutex lock_;
+  std::condition_variable cond_;
+
+  write_item(const PolarString *pkey, const PolarString *pvalue) :
+    key(pkey), value(pvalue) {
+  }
+
+  void wait_done() {
+    std::unique_lock<std::mutex> l(lock_);
+    cond_.wait(l, [&] { return is_done; } );
+  }
+
+  void set_ret_code(int ret_code) {
+    std::unique_lock<std::mutex> l(lock_);
+    is_done = true;
+    this->ret_code = ret_code;
+    cond_.notify_all();
+  }
+};
+
+class Queue {
+  public:
+    Queue(size_t cap): cap_(cap) { }
+
+    // just push the pointer of write_item into queue.
+    // the address of write_item maybe local variable
+    // in the stack, so the caller must wait before
+    // it return from stack-function.
+    void Push(write_item *w) {
+      // check the queue is full or not.
+      std::unique_lock<std::mutex> l(qlock_);
+      // check full or not.
+      produce_.wait(l, [&] { return q_.size() != cap_; });
+      q_.push_back(w);
+      consume_.notify_all();
+    }
+
+    void Pop(std::vector<write_item*> *vs) {
+        // wait for more write here.
+        qlock_.lock();
+        if (q_.size() < 1024) {
+          qlock_.unlock();
+          // do something here.
+          // is some reader blocked on the request?
+          std::this_thread::sleep_for(std::chrono::nanoseconds(20));
+        } else {
+          qlock_.unlock();
+        }
+
+        std::unique_lock<std::mutex> lck(qlock_);
+        consume_.wait(lck, [&] {return !q_.empty() ; });
+        vs->clear();
+        // get all the items.
+        std::copy(q_.begin(), q_.end(), std::back_inserter((*vs)));
+        q_.clear();
+        produce_.notify_all();
+    }
+  private:
+    std::deque<write_item*> q_;
+    std::mutex qlock_;
+    std::condition_variable produce_;
+    std::condition_variable consume_;
+    size_t cap_ = kMaxQueueSize;
+};
+
 class EngineRace : public Engine  {
  public:
   static RetCode Open(const std::string& name, Engine** eptr);
 
-  explicit EngineRace(const std::string& dir)
+  explicit EngineRace(const std::string& dir, size_t qs=kMaxQueueSize)
     : mu_(PTHREAD_MUTEX_INITIALIZER),
-    db_lock_(NULL), plate_(dir), store_(dir) {
+    db_lock_(NULL), plate_(dir), store_(dir), q_(qs) {
   }
 
   ~EngineRace();
@@ -36,16 +121,16 @@ class EngineRace : public Engine  {
       Visitor &visitor) override;
 
  private:
+  void run();
+
+ private:
   pthread_mutex_t mu_;
   FileLock* db_lock_;
   DoorPlate plate_;
   DataStore store_;
 
-  // add queue for batch write and batch read.
-  spinlock write_queue_lock_;
-  size_t write_queue_size_;
-  std::deque<std::pair<PolarString*, PolarString*> > writers_;
-
+  std::atomic<bool> stop_{false};
+  Queue q_;
 };
 
 }  // namespace polar_race
