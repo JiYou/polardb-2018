@@ -51,7 +51,6 @@ static bool ItemTryPlace(const Item &item, const std::string& target) {
 DoorPlate::DoorPlate(const std::string& path)
   : dir_(path),
   fd_(-1),
-  cache_(kMaxCacheCnt),
   items_(NULL) {
 }
 
@@ -198,24 +197,12 @@ RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
     DEBUG << " msync() failed " << std::endl;
     return kIOError;
   }
-
-  // find and updte the cache.
-  // put the item into cache.
-  cache_.FindThenUpdate(key, l);
-
   return kSucc;
 }
 
 RetCode DoorPlate::Find(const std::string& key, Location *location) {
   // try to find localtion in cache.
   Location pos;
-  auto ret = cache_.Get(key, &pos);
-  // if cache hit.
-  if (ret == kSucc) {
-    *location = pos;
-    return kSucc;
-  }
-
   int index = CalcIndex(key, false /*just for read*/);
   if (index < 0
       || !ItemKeyMatch(*(items_ + index), key)) {
@@ -224,7 +211,6 @@ RetCode DoorPlate::Find(const std::string& key, Location *location) {
   }
 
   *location = (items_ + index)->location;
-  cache_.Put(key, *location);
   return kSucc;
 }
 

@@ -47,18 +47,8 @@ class DoorPlate  {
  private:
     std::string dir_;
     int fd_;
-    LRUCache<std::string, Location> cache_;
     Item *items_;
-    // cache for position.
     std::unordered_map<int, int> pos_;
-    // LRUCache for item.
-    // record the content of key->item.
-    // decide to use enough items.
-    // each item is 28bytes.
-    // 28 * 1024 * 1024 ~= 28MB
-    // for this kind of cache, may use 512MB.
-    // for eache level, the capacity is 18MB
-    // So, the cache size = 18MB / 28 = 674K
 
     int CalcIndex(const std::string& key, bool is_write);
 };
