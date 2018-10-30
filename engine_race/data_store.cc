@@ -14,7 +14,7 @@
 
 namespace polar_race {
 
-//static constexpr int kMaxDataCacheCnt = 160 * 1024 * 1024; // this is for single list.
+static const std::string kDataDirName = "data";
 static const char kDataFilePrefix[] = "DATA_";
 static const int kDataFilePrefixLen = 5;
 static const int kSingleFileSize = 1024 * 1024 * 100;  // 100MB
@@ -22,6 +22,14 @@ static const int kSingleFileSize = 1024 * 1024 * 100;  // 100MB
 // 生成特定的文件名
 static std::string FileName(const std::string &dir, uint32_t fileno) {
   return dir + "/" + kDataFilePrefix + std::to_string(fileno);
+}
+
+DataStore::DataStore(const std::string path)
+    : fd_(-1), dir_(path+ "/" + kDataDirName) {
+  if (!FileExists(path)
+      && 0 != mkdir(path.c_str(), 0755)) {
+    DEBUG << "mkdir " << path<< " failed "  << std::endl;
+  }
 }
 
 RetCode DataStore::Init() {
@@ -68,6 +76,17 @@ RetCode DataStore::Init() {
   return OpenCurFile();
 }
 
+RetCode DataStore::Sync() {
+    if (fd_ > 0) {
+      if (fsync(fd_) < 0) {
+        DEBUG << " fsync failed" << std::endl;
+        return kIOError;
+      }
+      return kSucc;
+    }
+    return kIOError;
+}
+
 // because shere just use append, so no need to update the LRUCache.
 RetCode DataStore::Append(const std::string& value, Location* location) {
   if (value.size() > kSingleFileSize) {
@@ -76,6 +95,10 @@ RetCode DataStore::Append(const std::string& value, Location* location) {
   }
 
   if (next_location_.offset + value.size() > kSingleFileSize) {
+    if (fsync(fd_) < 0) {
+      DEBUG << " fsync failed" << std::endl;
+      return kIOError;
+    }
     close(fd_);
     next_location_.file_no += 1;
     next_location_.offset = 0;
@@ -85,10 +108,6 @@ RetCode DataStore::Append(const std::string& value, Location* location) {
   // Append write
   if (0 != FileAppend(fd_, value)) {
     DEBUG << " FileAppend()  failed" << std::endl;
-    return kIOError;
-  }
-  if (0 != fsync(fd_)) {
-    DEBUG << " fsync() failed" << std::endl;
     return kIOError;
   }
   location->file_no = next_location_.file_no;

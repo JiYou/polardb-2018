@@ -65,23 +65,38 @@ void EngineRace::run() {
 
     if (cnt % 1000 == 0)
       std::cout << "vs.size() = " << vs.size() << std::endl;
+
+    // firstly, write all the content into file.
+    pthread_mutex_lock(&mu_);
+
+    // write all the data.
     for (auto &x: vs) {
-      std::unique_lock<std::mutex> l(x->lock_);
-      {
-        pthread_mutex_lock(&mu_);
-        Location location;
-        // firstly, write the file content.
-        RetCode ret = store_.Append((x->value)->ToString(), &location);
-        if (ret == kSucc) {
-          // then write the <key,pos> into hash map.
-          ret = plate_.AddOrUpdate((x->key)->ToString(), location);
-        }
-        pthread_mutex_unlock(&mu_);
+      Location location;
+      RetCode ret = store_.Append((x->value)->ToString(), &location);
+      if (ret == kSucc) {
+        ret = plate_.Append((x->key)->ToString(), location);
       }
       x->is_done = true;
       x->ret_code = kSucc;
-      x->cond_.notify_all();
     }
+
+    // sync to disk.
+    RetCode ret = store_.Sync();
+    if (ret == kSucc) {
+      ret = plate_.Sync();
+    }
+
+    // if sync failed, change the ret code
+    // when previous set success.
+    if (ret != kSucc) {
+      for (auto &x: vs) {
+        if (x->ret_code == kSucc) {
+          x->ret_code = ret;
+        }
+        x->cond_.notify_all();
+      }
+    }
+    pthread_mutex_unlock(&mu_);
   }
 }
 

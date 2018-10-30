@@ -3,67 +3,46 @@
 #include "util.h"
 #include "door_plate.h"
 
+#include <stdio.h>
+#include <string.h>
+#include <dirent.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+
 #include <map>
 #include <cstring>
 #include <iostream>
 #include <utility>
-#include <stdio.h>
+#include <algorithm>
 
 namespace polar_race {
 
-// actually this is for single list.
-// there are 2 list in the cache.
-static constexpr int32_t kMaxCacheCnt = 9 * 1024 * 1024; // ~= 9*2*28MB ~= totaly 512MB
+static const std::string kMetaDirName = "index";
+static const char kMetaFileNamePrefix[] = "META_";
+static constexpr int kMetaFileNamePrefixLen = 5;
+static const int kSingleFileSize = 1024 * 1024 * 100;  // 100MB
 
-// max index count. origin size = 32M * 52byte.
-
-static const uint64_t kHashPrimeNumber = 85983083; // near to 82m
-static const uint64_t kMaxDoorCnt = 1024 * 1024 * 82;
-static const char kMetaFileName[] = "META";
-static const int64_t kMaxRangeBufCount = kMaxDoorCnt;
-
-// just simply compare the key is same or not.
-static bool ItemKeyMatch(const Item &item, const std::string& target) {
-  if (target.size() != item.key_size
-      || memcmp(item.key, target.data(), item.key_size) != 0) {
-    // Conflict
-    return false;
-  }
-  return true;
-}
-
-// can use this item place
-// true: this place is empty, taken it.
-// false, this place has been taken by other.
-static bool ItemTryPlace(const Item &item, const std::string& target) {
-  if (item.in_use == 0) {
-    return true;
-  }
-  // 如果不空，那么这里比较一下key
-  return ItemKeyMatch(item, target);
+// 生成特定的文件名
+static std::string FileName(const std::string &dir, uint32_t fileno) {
+  return dir + "/" + kMetaFileNamePrefix + std::to_string(fileno);
 }
 
 DoorPlate::DoorPlate(const std::string& path)
-  : dir_(path),
-  fd_(-1),
-  items_(NULL) {
+  : dir_(path + "/" + kMetaDirName),
+  fd_(-1) {
+  if (!FileExists(path)
+      && 0 != mkdir(path.c_str(), 0755)) {
+    DEBUG << "mkdir " << path<< " failed "  << std::endl;
+  }
 }
 
 RetCode DoorPlate::Init() {
   std::cout << "DoorPlate::Init()" << std::endl;
-  bool new_create = false;
-  // 使用了memmap?
-  // 32M item * sizeof(Item);
-  const uint64_t map_size = kMaxDoorCnt * sizeof(Item);
-  DEBUG << "item_size = " << sizeof(Item) << std::endl;
-  DEBUG << "map_size = " << map_size << std::endl;
 
-  // 如果目录不存在，创建之
+  // create the dir.
   if (!FileExists(dir_)
       && 0 != mkdir(dir_.c_str(), 0755)) {
     DEBUG << "mkdir " << dir_ << " failed "  << std::endl;
@@ -72,167 +51,158 @@ RetCode DoorPlate::Init() {
     printf("DoorPlace::Init() mkdir %s success\n", dir_.c_str());
   }
 
-  // 找到META文件
-  std::string path = dir_ + "/" + kMetaFileName;
-  int fd = open(path.c_str(), O_RDWR, 0644);
-  if (fd < 0 && errno == ENOENT) {
-    // not exist, then create
-    fd = open(path.c_str(), O_RDWR | O_CREAT, 0644);
-    if (fd >= 0) {
-      new_create = true;
-      // allocate the file size.
-      if (posix_fallocate(fd, 0, map_size) != 0) {
-        close(fd);
-        DEBUG << "posix_fallocate failed: " << strerror(errno) << std::endl;
-        return kIOError;
-      } else {
-        std::cout << "posix_fallocate: success: " << map_size << std::endl;
+  // get all the files.
+  std::vector<std::string> files;
+  if (0 != GetDirFiles(dir_, &files)) {
+    DEBUG << "call GetDirFiles() failed: " << dir_ << std::endl;
+    return kIOError;
+  }
+
+  // sort the meta files.
+  std::sort(files.begin(), files.end(),
+    [](const std::string &a, const std::string &b) {
+      const int va = atoi(a.c_str() + kMetaFileNamePrefixLen);
+      const int vb = atoi(b.c_str() + kMetaFileNamePrefixLen);
+      return va < vb;
+    }
+  );
+
+  // rebuild the index.
+  for (auto fn: files) {
+    // open file to read.
+    std::string file_name = dir_ + "/" + fn;
+    int fd = open(file_name.c_str(), O_RDONLY, 0644);
+    if (fd < 0) {
+      DEBUG << "open " << file_name << " failed" << std::endl;
+      return kIOError;
+    }
+
+    // at the begining of file.
+    Item item;
+    while (read(fd, &item, sizeof(item)) == sizeof(item)) {
+      if (item.in_use) {
+        std::string key(item.key, item.key_size);
+        UpdateHashMap(key, item.location);
       }
     }
-  }
-  if (fd < 0) {
-    DEBUG << "create file failed = " << path << std::endl;
-    return kIOError;
-  }
-  fd_ = fd;
-
-  void* ptr = mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
-  if (ptr == MAP_FAILED) {
     close(fd);
-    DEBUG << "MAP_FAILED: " << strerror(errno) << std::endl;
-    return kIOError;
   }
 
-  // 需要初始化
-  if (new_create) {
-    memset(ptr, 0, map_size);
+  // get the last file no, and offset;
+  if (!files.empty()) {
+    std::string file_name = files.back();
+    last_no_ = std::atoi(file_name.c_str() + kMetaFileNamePrefixLen);
+    int len = GetFileLength(FileName(dir_, last_no_));
+    if (len > 0) {
+      offset_ = len;
+    }
   }
-  // 指向了这个磁盘上的大文件
-  items_ = reinterpret_cast<Item*>(ptr);
-  return kSucc;
+
+  // Open file
+  return OpenCurFile();
 }
 
 DoorPlate::~DoorPlate() {
   if (fd_ > 0) {
-    const int map_size = kMaxDoorCnt * sizeof(Item);
-    munmap(items_, map_size);
     close(fd_);
   }
 }
 
-// Very easy hash table, which deal conflict only by try the next one
-// 这里只是计算出可用的index的位置
-int DoorPlate::CalcIndex(const std::string& key, bool is_write) {
-  uint32_t jcnt = 0;
-  // 根据字符串取模
-  // 得到相应的hash位置
-  int index = StrHash(key.data(), key.size()) % kHashPrimeNumber;
-  const int origin_index = index;
-
-  // search in the cache.hash
-  auto pos = pos_.find(index);
-  if (pos != pos_.end()) {
-    index = pos->second;
-  }
-
-  int steps = 0;
-  static int scan_times = 0;
-  scan_times += !is_write;
-  //  while (used_by_ohter && can_move_on) {
-  //     move_forward;
-  //  }
-  while (!ItemTryPlace(*(items_ + index), key)
-      && ++jcnt < kMaxDoorCnt) {
-    index = (index + 1) % kMaxDoorCnt;
-    ++steps;
-  }
-
-  if (!is_write) {
-    if (scan_times % (100000) == 0)
-    DEBUG << "walked steps = "  << steps << std::endl;
-  }
-
-  if (jcnt == kMaxDoorCnt) {
-    // full
-    DEBUG << "Can not find usable Index for item jcnt = " << jcnt << std::endl;
-    return -1;
-  // if is write, then the index is taken.
-  } else if (is_write) {
-    pos_[origin_index] = index;
-  }
-  return index;
+RetCode DoorPlate::Sync() {
+    if (fd_ > 0) {
+      if (fsync(fd_) < 0) {
+        DEBUG << " fsync failed" << std::endl;
+        return kIOError;
+      }
+      return kSucc;
+    }
+    return kIOError;
 }
 
-// 如果key太大,返回失败
-RetCode DoorPlate::AddOrUpdate(const std::string& key, const Location& l) {
+RetCode DoorPlate::Append(const std::string& key, const Location& l) {
+  if (offset_ + sizeof(Item) > kSingleFileSize) {
+    if (fsync(fd_) < 0) {
+      DEBUG << " fsync failed" << std::endl;
+      return kIOError;
+    }
+    close(fd_);
+
+    last_no_ += 1;
+    offset_ = 0;
+
+    auto ret = OpenCurFile();
+    if (ret != kSucc) {
+      DEBUG << " call OpenCurFile() failed" << std::endl;
+      return ret;
+    }
+  }
+
+
   if (key.size() > kMaxKeyLen) {
-    return kInvalidArgument;
-  }
-
-  int index = CalcIndex(key, true /*is_write*/);
-  if (index < 0) {
-    DEBUG << " space is full " << std::endl;
-    return kFull;
-  }
-
-  Item* iptr = items_ + index;
-
-  if (iptr->in_use == 0) {
-    // new item
-    memcpy(iptr->key, key.data(), key.size());
-    iptr->key_size = key.size();
-    iptr->in_use = 1;  // Place
-  }
-  iptr->location = l;
-
-  // if use msync, we need to check the page size.
-  // the content may across several pages.
-  void *origin_addr = reinterpret_cast<void*>(iptr->key);
-  uint64_t mod {4095};
-  mod = ~mod;
-  auto align_addr = reinterpret_cast<void*>(reinterpret_cast<uint64_t>(origin_addr) & (~4095));
-  auto left = reinterpret_cast<size_t>(iptr->key) & 4095;
-  if (0 != msync(align_addr, left + sizeof(Item), MS_SYNC)) {
-    DEBUG << "errno = " << strerror(errno) << std::endl;
-    DEBUG << " msync() failed " << std::endl;
+    DEBUG << " key length larger than kMaxKeyLen" << std::endl;
     return kIOError;
   }
+
+  // create Item
+  Item item;
+  item.location = l;
+  if (key.size() == kMaxKeyLen) {
+    const uint64_t *a = reinterpret_cast<const uint64_t*>(key.c_str());
+    uint64_t *b = reinterpret_cast<uint64_t*>(item.key);
+    *b = *a;
+  } else {
+    for (size_t i = 0; i < key.size(); i++) {
+      item.key[i] = key[i];
+    }
+  }
+  item.key_size = static_cast<uint8_t>(key.size());
+  item.in_use = 1;
+
+  // insert into hash_map
+  UpdateHashMap(key, l);
+
+  if (0 != FileAppend(fd_, &item, sizeof(item))) {
+    DEBUG << " FileAppend()  failed" << std::endl;
+    return kIOError;
+  }
+
+  offset_ += sizeof(Item);
   return kSucc;
 }
 
 RetCode DoorPlate::Find(const std::string& key, Location *location) {
-  // try to find localtion in cache.
-  Location pos;
-  int index = CalcIndex(key, false /*just for read*/);
-  if (index < 0
-      || !ItemKeyMatch(*(items_ + index), key)) {
-    DEBUG << " index < 0: " << (index < 0) << " KeyNotMatch() = " << (!ItemKeyMatch(*(items_ + index), key)) << std::endl;
+  auto pos = hash_map_.find(key);
+  if (pos == hash_map_.end()) {
     return kNotFound;
   }
-
-  *location = (items_ + index)->location;
+  *location = pos->second;
   return kSucc;
 }
 
 RetCode DoorPlate::GetRangeLocation(const std::string& lower,
     const std::string& upper,
     std::map<std::string, Location> *locations) {
-  int count = 0;
-  for (Item *it = items_ + kMaxDoorCnt - 1; it >= items_; it--) {
-    if (!it->in_use) {
-      continue;
-    }
-    std::string key(it->key, it->key_size);
-    if ((key >= lower || lower.empty())
-        && (key < upper || upper.empty())) {
-      locations->insert(std::pair<std::string, Location>(key, it->location));
-      if (++count > kMaxRangeBufCount) {
-        DEBUG << " Out of Memory " << std::endl;
-        return kOutOfMemory;
-      }
-    }
-  }
   return kSucc;
+}
+
+RetCode DoorPlate::OpenCurFile() {
+  std::string file_name = FileName(dir_, last_no_);
+  int fd = open(file_name.c_str(), O_APPEND | O_WRONLY | O_CREAT, 0644);
+  if (fd < 0) {
+    DEBUG << " open " << file_name << " failed" << std::endl;
+    return kIOError;
+  }
+  fd_ = fd;
+  return kSucc;
+}
+
+void DoorPlate::UpdateHashMap(const std::string &key, const Location &l) {
+  auto ret = hash_map_.emplace(std::piecewise_construct,
+                               std::forward_as_tuple(key),
+                               std::forward_as_tuple(l));
+  if (!ret.second) {
+    ret.first->second = l;
+  }
 }
 
 }  // namespace polar_race

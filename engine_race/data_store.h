@@ -25,6 +25,8 @@ inline bool operator==(const Location &l, const Location& r) {
 } // end of namespace polar_race
 
 
+// this is for content cache_.
+// but it may cost a lot of memory.
 namespace std {
   template<>
   struct hash<polar_race::Location> {
@@ -39,10 +41,11 @@ namespace std {
 namespace polar_race {
 // begin of namespace polar_race
 
+// TODO
+// add file_no -> file_fd
 class DataStore  {
  public:
-  explicit DataStore(const std::string dir)
-    : fd_(-1), dir_(dir)/*, cache_(160*1024*1024)*/ {}
+  explicit DataStore(const std::string dir);
 
   ~DataStore() {
     if (fd_ > 0) {
@@ -53,6 +56,7 @@ class DataStore  {
   RetCode Init();
   RetCode Read(const Location& l, std::string* value);
   RetCode Append(const std::string& value, Location* location);
+  RetCode Sync();
 
  private:
   int fd_;
@@ -70,6 +74,8 @@ class DataStore  {
   // for some free memory, here set 160K
   // 160K * 8K ~= 1.28G
   //LRUCache<Location, std::string> cache_;
+
+
   RetCode OpenCurFile();
 };
 

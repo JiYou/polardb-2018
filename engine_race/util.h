@@ -18,6 +18,7 @@ uint32_t StrHash(const char* s, int size);
 int GetDirFiles(const std::string& dir, std::vector<std::string>* result);
 int GetFileLength(const std::string& file);
 int FileAppend(int fd, const std::string& value);
+int FileAppend(int fd, const void *buf, size_t len);
 bool FileExists(const std::string& path);
 
 // FileLock

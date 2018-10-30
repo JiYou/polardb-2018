@@ -68,6 +68,29 @@ int FileAppend(int fd, const std::string& value) {
   return 0;
 }
 
+int FileAppend(int fd, const void *buf, size_t len) {
+  if (fd < 0) {
+    return -1;
+  }
+
+  size_t value_len = len;
+  const char* pos = static_cast<const char*>(buf);
+  while (value_len > 0) {
+    ssize_t r = write(fd, pos, value_len);
+    if (r < 0) {
+      if (errno == EINTR) {
+        continue;  // Retry
+      }
+      return -1;
+    }
+    pos += r;
+    value_len -= r;
+  }
+  return 0;
+}
+
+
+
 bool FileExists(const std::string& path) {
   return access(path.c_str(), F_OK) == 0;
 }
