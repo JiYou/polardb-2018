@@ -52,6 +52,29 @@ EngineRace::~EngineRace() {
   }
 }
 
+void EngineRace::run() {
+  std::vector<write_item*> vs;
+  DEBUG << "db::run()" << std::endl;
+  while (!stop_) {
+    q_.Pop(&vs);
+    std::cout << "vs.size() = " << vs.size() << std::endl;
+    for (auto &x: vs) {
+      std::unique_lock<std::mutex> l(x->lock_);
+      {
+        pthread_mutex_lock(&mu_);
+        // TODO
+        // firstly, write the value into -> log
+        // secondly, update the key-ops.
+        // hash_[*(x->key)] = *(x->value);
+        pthread_mutex_unlock(&mu_);
+      }
+      x->is_done = true;
+      x->ret_code = kSucc;
+      x->cond_.notify_all();
+    }
+  }
+}
+
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   if (key.size() != 8 || value.size() != 4096) {
     // check the key size.
