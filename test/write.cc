@@ -99,7 +99,7 @@ int main() {
 
   std::string value;
   ret = engine->Read("xxxxxxxyyy", &value);
-  printf("[WARN]: can not find the item. ret = %d\n", ret);
+  printf("[WARN]: TEST_NOT_FOUND [PASS] can not find the item. ret = %d\n", ret);
 
   delete engine;
   return 0;
