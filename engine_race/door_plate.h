@@ -32,6 +32,22 @@ struct Item {
   uint8_t in_use;        // 这个item是否被使用
 };
 
+class IndexHash {
+ public:
+  RetCode Get(const std::string &key, Location *l);
+  RetCode Set(const std::string &key, const Location &l);
+  IndexHash() { }
+  ~IndexHash() { }
+
+ public:
+  IndexHash(const IndexHash &) = delete;
+  IndexHash(const IndexHash &&) = delete;
+  IndexHash &operator=(const IndexHash&) = delete;
+  IndexHash &operator=(const IndexHash&&) = delete;
+ private:
+  std::unordered_map<int64_t, uint32_t> hash_;
+};
+
 // Hash index for key
 // 这里就是利用开地址法，在磁盘上一个大文件里面实现了一个巨大的hash
 // 任何的读写操作都是在这个基于文件的hash上完成
@@ -58,7 +74,7 @@ class DoorPlate  {
     int fd_ = -1;
     uint32_t last_no_ = 0;
     uint32_t offset_ = 0;
-    std::unordered_map<std::string, Location> hash_map_;
+    IndexHash compress_hash_map_;
 };
 
 }  // namespace polar_race

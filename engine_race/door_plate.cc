@@ -25,6 +25,48 @@ static const char kMetaFileNamePrefix[] = "META_";
 static constexpr int kMetaFileNamePrefixLen = 5;
 static const int kSingleFileSize = 1024 * 1024 * 100;  // 100MB
 
+// IndexHash
+RetCode IndexHash::Get(const std::string &key, Location *l) {
+  const int64_t *k = reinterpret_cast<const int64_t*>(key.data());
+  auto iter = hash_.find(*k);
+  if (iter == hash_.end()) {
+    return kNotFound;
+  }
+
+  static constexpr int split_pos = 16;
+  static constexpr int value_length_bits = 12;
+  uint32_t pos = iter->second;
+  // 16bit|16bit = 32bit;
+  // the first 16bit is stands for file_no
+  // the second 16bit stands for offset /4K
+  uint16_t file_no = pos >> split_pos;
+  uint32_t offset = (pos & 0xffff) << value_length_bits;
+
+  l->file_no = file_no;
+  l->offset = offset;
+  l->len = 1 << value_length_bits;
+  return kSucc;
+}
+
+RetCode IndexHash::Set(const std::string &key, const Location &l) {
+  const int64_t *k = reinterpret_cast<const int64_t*>(key.data());
+  static constexpr int split_pos = 16;
+  static constexpr int value_length_bits = 12;
+
+  uint32_t file_no = l.file_no;
+  uint32_t offset = l.offset >> value_length_bits;
+  uint32_t pos = (file_no << split_pos) | offset;
+
+  auto ret = hash_.emplace(std::piecewise_construct,
+                               std::forward_as_tuple(*k),
+                               std::forward_as_tuple(pos));
+
+  if (!ret.second) {
+    ret.first->second = pos;
+  }
+  return kSucc;
+}
+
 // 生成特定的文件名
 static std::string FileName(const std::string &dir, uint32_t fileno) {
   return dir + "/" + kMetaFileNamePrefix + std::to_string(fileno);
@@ -171,12 +213,8 @@ RetCode DoorPlate::Append(const std::string& key, const Location& l) {
 }
 
 RetCode DoorPlate::Find(const std::string& key, Location *location) {
-  auto pos = hash_map_.find(key);
-  if (pos == hash_map_.end()) {
-    return kNotFound;
-  }
-  *location = pos->second;
-  return kSucc;
+  auto ret = compress_hash_map_.Get(key, location);
+  return ret;
 }
 
 RetCode DoorPlate::GetRangeLocation(const std::string& lower,
@@ -197,12 +235,7 @@ RetCode DoorPlate::OpenCurFile() {
 }
 
 void DoorPlate::UpdateHashMap(const std::string &key, const Location &l) {
-  auto ret = hash_map_.emplace(std::piecewise_construct,
-                               std::forward_as_tuple(key),
-                               std::forward_as_tuple(l));
-  if (!ret.second) {
-    ret.first->second = l;
-  }
+  compress_hash_map_.Set(key, l);
 }
 
 }  // namespace polar_race
