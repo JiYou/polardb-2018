@@ -94,7 +94,6 @@ private:
   int hint_file_ = -1;
 
   // file id -> fd & pos.
-  // do not put active_id_ into this hash.
   struct file_info {
     int fd;
     int pos;

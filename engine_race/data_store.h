@@ -47,11 +47,7 @@ class DataStore  {
  public:
   explicit DataStore(const std::string dir);
 
-  ~DataStore() {
-    if (fd_ > 0) {
-      close(fd_);
-    }
-  }
+  ~DataStore();
 
   RetCode Init();
   RetCode Read(const Location& l, std::string* value);
@@ -73,8 +69,14 @@ class DataStore  {
   // 128K*2*4K = 1G
   // for some free memory, here set 160K
   // 160K * 8K ~= 1.28G
-  //LRUCache<Location, std::string> cache_;
+  // LRUCache<Location, std::string> cache_;
 
+  struct file_info {
+    int fd;
+    uint32_t pos;
+    file_info(int f, int p): fd(f), pos(p) { }
+  };
+  std::unordered_map<int, file_info> fd_cache_;
 
   RetCode OpenCurFile();
 };

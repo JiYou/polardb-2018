@@ -267,8 +267,6 @@ Status Bitcask::Retrieve(const BitcaskIndex& index, std::string* value) {
       std::cout << "read data fail pos = " << index.data_pos << std::endl;
       return s.IOError(file_name + "pos:" + std::to_string(index.data_pos));
     }
-
-    // not current file, add it into cache.
     fd_cache_.emplace(std::piecewise_construct,
                       std::forward_as_tuple(index.file_id),
                       std::forward_as_tuple(fd, index.data_pos + sizeof(data)));

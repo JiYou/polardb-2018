@@ -2,8 +2,11 @@
 #include "util.h"
 #include "data_store.h"
 
-#include <stdio.h>
+#include <sys/types.h>
+#include <unistd.h>
 
+#include <stdio.h>
+#include <assert.h>
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -29,6 +32,16 @@ DataStore::DataStore(const std::string path)
   if (!FileExists(path)
       && 0 != mkdir(path.c_str(), 0755)) {
     DEBUG << "mkdir " << path<< " failed "  << std::endl;
+  }
+}
+
+DataStore::~DataStore() {
+  if (fd_ > 0) {
+    close(fd_);
+  }
+
+  for (auto &item: fd_cache_) {
+    close(item.second.fd);
   }
 }
 
@@ -125,20 +138,44 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
   //  return kSucc;
   //}
 
-  // 这里直接定位到相应的文件，然后打开之.
-  int fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY, 0644);
-  if (fd < 0) {
-    DEBUG << " open " << FileName(dir_, l.file_no).c_str() << " failed" << std::endl;
+  auto iter = fd_cache_.find(l.file_no);
+
+  // if not found. try to add it into cache.
+  if (iter == fd_cache_.end()) {
+    int fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY, 0644);
+    if (fd < 0) {
+      DEBUG << " open " << FileName(dir_, l.file_no).c_str() << " failed" << std::endl;
+      return kIOError;
+    }
+    auto ret = fd_cache_.emplace(std::piecewise_construct,
+                                 std::forward_as_tuple(l.file_no),
+                                 std::forward_as_tuple(fd, 0));
+    iter = ret.first;
+  }
+
+  // need to seek?
+  int64_t old_pos = iter->second.pos;
+  int64_t want_pos = l.offset;
+  int fd = iter->second.fd;
+
+  if (l.offset != old_pos) {
+    lseek(fd, want_pos - old_pos, SEEK_CUR);
+  }
+
+  if (lseek(fd, 0, SEEK_CUR) != l.offset) {
+    DEBUG << "cur = " << lseek(fd, 0, SEEK_CUR) << "logic = " << l.offset << std::endl;
+    DEBUG << "the file offset is not right!" << std::endl;
     return kIOError;
   }
-  lseek(fd, l.offset, SEEK_SET);
 
-  char* buf = new char[l.len]();
+  value->resize(l.len);
+  char* buf = const_cast<char*>(value->data());
   char* pos = buf;
   uint32_t value_len = l.len;
 
   while (value_len > 0) {
     ssize_t r = read(fd, pos, value_len);
+    if (r == 0) return kIOError; // JIYOU
     if (r < 0) {
       if (errno == EINTR) {
         continue;  // Retry
@@ -150,13 +187,11 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
     pos += r;
     value_len -= r;
   }
-  *value = std::string(buf, l.len);
+  iter->second.pos = l.offset + l.len;
 
   // if not find,  then put it into cache.
   //cache_.Put(l, *value);
 
-  delete [] buf;
-  close(fd);
   return kSucc;
 }
 
