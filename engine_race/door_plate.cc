@@ -67,6 +67,74 @@ RetCode IndexHash::Set(const std::string &key, const Location &l) {
   return kSucc;
 }
 
+uint64_t HashTreeTable::compute_pos(uint64_t x) {
+  // hash tree algorithm
+  return (((((x % 17) * 19 + x % 19) * 23 + x % 23) * 29 + x % 29) * 31 + x % 31);
+}
+
+RetCode HashTreeTable::find(std::vector<kv_info> &vs, uint64_t key, kv_info **ptr) {
+  for (auto &x: vs) {
+    if (x.key == key) {
+      *ptr = &x;
+      return kSucc;
+    }
+  }
+  return kNotFound;
+}
+
+RetCode HashTreeTable::Get(const std::string &key, Location *l) {
+  const uint64_t *k = reinterpret_cast<const uint64_t*>(key.data());
+  const uint64_t array_pos = compute_pos(*k);
+
+  // then begin to search this array.
+  auto &vs = hash_[array_pos];
+  uint32_t pos = 0;
+  kv_info *ptr = nullptr;
+  auto ret = find(vs, *k, &ptr);
+  if (ret == kNotFound) {
+    return kNotFound;
+  }
+  pos = ptr->pos;
+
+  static constexpr int split_pos = 16;
+  static constexpr int value_length_bits = 12;
+  // 16bit|16bit = 32bit;
+  // the first 16bit is stands for file_no
+  // the second 16bit stands for offset /4K
+  uint16_t file_no = pos >> split_pos;
+  uint32_t offset = (pos & 0xffff) << value_length_bits;
+
+  l->file_no = file_no;
+  l->offset = offset;
+  l->len = 1 << value_length_bits;
+  return kSucc;
+}
+
+RetCode HashTreeTable::Set(const std::string &key, const Location &l) {
+  const int64_t *k = reinterpret_cast<const int64_t*>(key.data());
+  static constexpr int split_pos = 16;
+  static constexpr int value_length_bits = 12;
+
+  uint32_t file_no = l.file_no;
+  uint32_t offset = l.offset >> value_length_bits;
+  uint32_t pos = (file_no << split_pos) | offset;
+
+  const uint64_t array_pos = compute_pos(*k);
+  auto &vs = hash_[array_pos];
+
+  kv_info *ptr;
+  auto ret = find(vs, *k, &ptr);
+
+  if (ret == kNotFound) {
+    vs.emplace_back(*k, pos);
+  } else {
+    ptr->pos = pos;
+  }
+
+  return kSucc;
+}
+
+
 // 生成特定的文件名
 static std::string FileName(const std::string &dir, uint32_t fileno) {
   return dir + "/" + kMetaFileNamePrefix + std::to_string(fileno);
@@ -213,7 +281,7 @@ RetCode DoorPlate::Append(const std::string& key, const Location& l) {
 }
 
 RetCode DoorPlate::Find(const std::string& key, Location *location) {
-  auto ret = compress_hash_map_.Get(key, location);
+  auto ret = hash_table_.Get(key, location);
   return ret;
 }
 
@@ -235,7 +303,7 @@ RetCode DoorPlate::OpenCurFile() {
 }
 
 void DoorPlate::UpdateHashMap(const std::string &key, const Location &l) {
-  compress_hash_map_.Set(key, l);
+  hash_table_.Set(key, l);
 }
 
 }  // namespace polar_race

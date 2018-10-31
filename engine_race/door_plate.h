@@ -48,6 +48,32 @@ class IndexHash {
   std::unordered_map<int64_t, uint32_t> hash_;
 };
 
+class HashTreeTable {
+ public:
+  RetCode Get(const std::string &key, Location *l);
+  RetCode Set(const std::string &key, const Location &l);
+  HashTreeTable() {
+    hash_.resize(17*19*23*29*31+1);
+  }
+  ~HashTreeTable() { }
+
+ public:
+  HashTreeTable(const HashTreeTable &) = delete;
+  HashTreeTable(const HashTreeTable &&) = delete;
+  HashTreeTable &operator=(const HashTreeTable&) = delete;
+  HashTreeTable &operator=(const HashTreeTable&&) = delete;
+ private:
+  struct kv_info {
+    uint64_t key;
+    uint32_t pos;
+    kv_info(uint64_t k, uint32_t v): key(k), pos(v) { }
+  };
+  std::vector<std::vector<kv_info>> hash_;
+ private:
+  uint64_t compute_pos(uint64_t key);
+  RetCode find(std::vector<kv_info> &vs, uint64_t key, kv_info **ptr);
+};
+
 // Hash index for key
 // 这里就是利用开地址法，在磁盘上一个大文件里面实现了一个巨大的hash
 // 任何的读写操作都是在这个基于文件的hash上完成
@@ -74,7 +100,8 @@ class DoorPlate  {
     int fd_ = -1;
     uint32_t last_no_ = 0;
     uint32_t offset_ = 0;
-    IndexHash compress_hash_map_;
+    // IndexHash compress_hash_map_;
+    HashTreeTable hash_table_;
 };
 
 }  // namespace polar_race
