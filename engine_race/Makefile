@@ -42,11 +42,13 @@ SRC_PATH = $(CURDIR)
 
 # ----------------Dependences-------------------
 
-INCLUDE_PATH = -I./ 
+INCLUDE_PATH = -I./
 
 # ---------------End Dependences----------------
 
 LIB_SOURCES := $(wildcard $(SRC_PATH)/*.cc)
+AIO_SOURCES := $(wildcard $(SRC_PATH)/*.c)
+
 
 #-----------------------------------------------
 
@@ -91,7 +93,8 @@ CXXFLAGS += $(WARNING_FLAGS) $(INCLUDE_PATH) $(PLATFORM_CXXFLAGS) $(OPT)
 
 LDFLAGS += $(PLATFORM_LDFLAGS)
 
-LIBOBJECTS = $(LIB_SOURCES:.cc=.o)
+LIBOBJECTS = $(LIB_SOURCES:.cc=.o) $(AIO_SOURCES:.c=.o)
+
 # if user didn't config LIBNAME, set the default
 ifeq ($(LIBNAME),)
 # we should only run benchmark in production with DEBUG_LEVEL 0

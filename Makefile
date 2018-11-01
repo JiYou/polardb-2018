@@ -39,7 +39,7 @@ endif
 
 # ----------------Dependences-------------------
 
-INCLUDE_PATH = -I./ 
+INCLUDE_PATH = -I./ -I./engine_race
 
 # ---------------End Dependences----------------
 

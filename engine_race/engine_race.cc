@@ -2,6 +2,7 @@
 
 #include "engine_race/util.h"
 #include "engine_race/engine_race.h"
+#include "engine_race/libaio.h"
 
 #include <fcntl.h>
 #include <sys/stat.h>
