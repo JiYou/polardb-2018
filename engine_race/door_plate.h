@@ -55,9 +55,6 @@ class HashTreeTable {
   HashTreeTable() {
     constexpr size_t maxBucketSize = 17 * 19 * 23 * 29 * 31 + 1;
     hash_.resize(maxBucketSize);
-    for (auto &x: hash_) {
-      x.resize(8); // keep 8 items for speedup.
-    }
   }
   ~HashTreeTable() { }
 
