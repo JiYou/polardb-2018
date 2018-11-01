@@ -27,6 +27,7 @@
 namespace polar_race {
 
 static constexpr size_t kMaxQueueSize = 4096; // 4K * 4Kitem ~= 16MB
+static constexpr size_t kMaxFlushItem = 64;   // because there are 64 threads r/w.
 
 struct write_item {
   const PolarString *key = nullptr;
@@ -67,11 +68,11 @@ class Queue {
     void Pop(std::vector<write_item*> *vs) {
         // wait for more write here.
         qlock_.lock();
-        if (q_.size() < 1024) {
+        if (q_.size() < kMaxFlushItem) {
           qlock_.unlock();
           // do something here.
           // is some reader blocked on the request?
-          std::this_thread::sleep_for(std::chrono::nanoseconds(20));
+          std::this_thread::sleep_for(std::chrono::nanoseconds(4));
         } else {
           qlock_.unlock();
         }

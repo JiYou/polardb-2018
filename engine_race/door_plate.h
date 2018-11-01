@@ -53,7 +53,11 @@ class HashTreeTable {
   RetCode Get(const std::string &key, Location *l);
   RetCode Set(const std::string &key, const Location &l);
   HashTreeTable() {
-    hash_.resize(17*19*23*29*31+1);
+    constexpr size_t maxBucketSize = 17 * 19 * 23 * 29 * 31 + 1;
+    hash_.resize(maxBucketSize);
+    for (auto &x: hash_) {
+      x.resize(8); // keep 8 items for speedup.
+    }
   }
   ~HashTreeTable() { }
 
@@ -63,11 +67,15 @@ class HashTreeTable {
   HashTreeTable &operator=(const HashTreeTable&) = delete;
   HashTreeTable &operator=(const HashTreeTable&&) = delete;
  private:
+  // uint64 & uint32_t would taken 16 bytes, if not align with bytes.
+  #pragma pack(push, 1)
   struct kv_info {
     uint64_t key;
     uint32_t pos;
     kv_info(uint64_t k, uint32_t v): key(k), pos(v) { }
+    kv_info(): key(0), pos(0) { }
   };
+  #pragma pack(pop)
   std::vector<std::vector<kv_info>> hash_;
  private:
   uint64_t compute_pos(uint64_t key);

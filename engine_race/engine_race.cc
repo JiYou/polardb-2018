@@ -56,16 +56,10 @@ EngineRace::~EngineRace() {
 }
 
 void EngineRace::run() {
-  int64_t cnt = 0;
   std::vector<write_item*> vs;
   DEBUG << "db::run()" << std::endl;
   while (!stop_) {
     q_.Pop(&vs);
-    cnt ++;
-
-    if (cnt % 1000 == 0)
-      std::cout << "vs.size() = " << vs.size() << std::endl;
-
     // firstly, write all the content into file.
     pthread_mutex_lock(&mu_);
 
