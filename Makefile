@@ -71,7 +71,8 @@ am__v_CCLD_1 =
 
 AM_LINK = $(AM_V_CCLD)$(CXX) $^ $(EXEC_LDFLAGS) -o $@ $(LDFLAGS)
 
-CXXFLAGS += -g
+# run as fast
+CXXFLAGS += -O3
 
 # This (the first rule) must depend on "all".
 default: all
