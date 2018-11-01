@@ -1,20 +1,38 @@
+#include "engine_race/libaio.h"
 #include <fcntl.h>
-#include <gflags/gflags.h>
-#include <glog/logging.h>
-#include <libaio.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <iostream>
 
-DEFINE_string(path, "/tmp/testfile", "Path to the file to manipulate");
-DEFINE_int32(file_size, 1000, "Length of file in 4k blocks");
-DEFINE_int32(concurrent_requests, 100, "Number of concurrent requests");
-DEFINE_int32(min_nr, 1, "min_nr");
-DEFINE_int32(max_nr, 1, "max_nr");
+#include <stdio.h>
+#include <string.h>
+#include <dirent.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+
+static const std::string path = "/tmp/testfile"; // "Path to the file to manipulate";
+static const int32_t file_size = 1000; // "Length of file in 4k blocks"
+static const int32_t concurrent_requests = 100; // "Number of concurrent requests"
+static const int32_t min_nr = 1; // "min_nr"
+static const int32_t max_nr = 1; // "max_nr"
 
 // The size of operation that will occur on the device
 static const int kPageSize = 4096;
+
+#define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"()"<<"msg="<<strerror(errno)
+
+#define CHECK_EQ(a,b) do {            \
+  if ((a) != (b)) {                   \
+    DEBUG << "FIND NOT EQUAL!\n";     \
+  }                                   \
+} while (0)
+
+#define LOG(x) std::cout
 
 class AIORequest {
  public:
@@ -48,7 +66,7 @@ class AIOReadRequest : public AIORequest {
   AIOReadRequest(Adder* adder) : AIORequest(), adder_(adder) { }
 
   virtual void Complete(int res) {
-    CHECK_EQ(res, kPageSize) << "Read incomplete or error " << res;
+    CHECK_EQ(res, kPageSize); // << "Read incomplete or error " << res;
     int value = buffer_[0];
     LOG(INFO) << "Read of " << value << " completed";
     adder_->Add(value);
@@ -65,7 +83,7 @@ class AIOWriteRequest : public AIORequest {
   }
 
   virtual void Complete(int res) {
-    CHECK_EQ(res, kPageSize) << "Write incomplete or error " << res;
+    CHECK_EQ(res, kPageSize); // << "Write incomplete or error " << res;
     LOG(INFO) << "Write of " << value_ << " completed";
   }
 };
@@ -84,12 +102,12 @@ class AIOAdder : public Adder {
 
   void Init() {
     LOG(INFO) << "Opening file";
-    fd_ = open(FLAGS_path.c_str(), O_RDWR | O_DIRECT | O_CREAT, 0644);
-    PCHECK(fd_ >= 0) << "Error opening file";
+    fd_ = open(path.c_str(), O_RDWR | O_DIRECT | O_CREAT, 0644);
+    // PCHECK(fd_ >= 0) << "Error opening file";
     LOG(INFO) << "Allocating enough space for the sum";
-    PCHECK(fallocate(fd_, 0, 0, kPageSize * length_) >= 0) << "Error in fallocate";
+    // PCHECK(fallocate(fd_, 0, 0, kPageSize * length_) >= 0) << "Error in fallocate";
     LOG(INFO) << "Setting up the io context";
-    PCHECK(io_setup(100, &ioctx_) >= 0) << "Error in io_setup";
+    // PCHECK(io_setup(100, &ioctx_) >= 0) << "Error in io_setup";
   }
 
   virtual void Add(int amount) {
@@ -139,14 +157,14 @@ class AIOAdder : public Adder {
 
   int DoReap(int min_nr) {
     LOG(INFO) << "Reaping between " << min_nr << " and "
-              << FLAGS_max_nr << " io_events";
-    struct io_event* events = new io_event[FLAGS_max_nr];
+              << max_nr << " io_events";
+    struct io_event* events = new io_event[max_nr];
     struct timespec timeout;
     timeout.tv_sec = 0;
     timeout.tv_nsec = 100000000;
     int num_events;
     LOG(INFO) << "Calling io_getevents";
-    num_events = io_getevents(ioctx_, min_nr, FLAGS_max_nr, events,
+    num_events = io_getevents(ioctx_, min_nr, max_nr, events,
                               &timeout);
     LOG(INFO) << "Calling completion function on results";
     for (int i = 0; i < num_events; i++) {
@@ -162,8 +180,8 @@ class AIOAdder : public Adder {
   }
 
   void Reap() {
-    if (counter_ >= FLAGS_min_nr) {
-      DoReap(FLAGS_min_nr);
+    if (counter_ >= min_nr) {
+      DoReap(min_nr);
     }
   }
 
@@ -189,14 +207,13 @@ class AIOAdder : public Adder {
 };
 
 int main(int argc, char* argv[]) {
-  google::ParseCommandLineFlags(&argc, &argv, true);
-  AIOAdder adder(FLAGS_file_size);
+  AIOAdder adder(file_size);
   adder.Init();
   int sum = adder.Sum();
-  int expected = (FLAGS_file_size * (FLAGS_file_size - 1)) / 2;
+  int expected = (file_size * (file_size - 1)) / 2;
   LOG(INFO) << "AIO is complete";
-  CHECK_EQ(sum, expected) << "Expected " << expected << " Got " << sum;
+  CHECK_EQ(sum, expected); //  << "Expected " << expected << " Got " << sum;
   printf("Successfully calculated that the sum of integers from 0"
-         " to %d is %d\n", FLAGS_file_size - 1, sum);
+         " to %d is %d\n", file_size - 1, sum);
   return 0;
 }

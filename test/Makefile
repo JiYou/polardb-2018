@@ -1,4 +1,4 @@
-ALL: write read truncate_test prod_test aio_read
+ALL: write read truncate_test prod_test aio_read aio_example
 write: write.cc
 	g++ -O3 -std=c++11 -o write -g -I.. write.cc -L../lib -lengine -lpthread -lrt
 read: read.cc
@@ -11,6 +11,8 @@ prod_test: prod_test.cc
 	g++ -O3 -std=c++11 -o prod_test -g -I.. prod_test.cc -L../lib -lengine -lpthread -lrt
 aio_read: aio_read.cc
 	g++ -O3 -std=c++11 -o aio_read -g -I.. aio_read.cc -L../lib -lengine -lpthread -lrt
+aio_example: aio_example.cc
+	g++ -O3 -std=c++11 -o aio_example -g -I.. aio_example.cc -L../lib -lengine -lpthread -lrt
 
 
 .PHONY: clean
