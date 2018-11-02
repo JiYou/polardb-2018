@@ -7,9 +7,13 @@
 
 int main(void) {
   int fd = open("/tmp/dd", O_CREAT | O_RDWR, S_IWRITE | S_IREAD);
-  ftruncate(fd, 1024*1024*100);
+  if (ftruncate(fd, 1024*1024*100) < 0) {
+    printf("error of truncate()\n");
+  }
   lseek(fd, 10, SEEK_SET);
-  write(fd, "aa", 2);
+  if (write(fd, "aa", 2) != 2) {
+    printf("error write data!\n");
+  }
   close(fd);
   return 0;
 }
