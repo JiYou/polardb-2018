@@ -1,19 +1,123 @@
 #include "engine_race/libaio.h"
-#include <stdio.h>
 #include <fcntl.h>
-#include <string.h>
 #include <stdlib.h>
-#include <errno.h>
-#include <unistd.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <iostream>
 
+#include <stdio.h>
+#include <string.h>
+#include <dirent.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+
+#include <iostream>
+
+#define LOG(x) std::cout
+#define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"()"<<"msg="<<strerror(errno)
 
 constexpr int kMaxAIOEvents = 64;
+constexpr int kMaxReadPosition = 64;
+const char *file_name = "DATA_0";
+constexpr int kMaxFileSize = 1000; // 1000 blocks with 4KB a block.
+constexpr int kPageSize = 4096;
 
+int gen_file() {
+  int fd = -1;
+
+  fd = open(file_name, O_RDWR | O_DIRECT | O_CREAT, 0644);
+  if (fd < 0) {
+    DEBUG << "Error opening file" << std::endl;
+  }
+
+  LOG(INFO) << "Allocating enough space for the sum" << std::endl;
+  if (fallocate(fd, 0, 0, kPageSize * kMaxFileSize) < 0) {
+    DEBUG << "Error in fallocate" << std::endl;
+  }
+
+  // alloc the memory
+  char *pages[kMaxFileSize];
+  for (int i = 0; i < kMaxFileSize; i++) {
+    char *buf = nullptr;
+    if (posix_memalign(reinterpret_cast<void**>(&buf), kPageSize, kPageSize)) {
+      perror("posix_memalign failed!\n");
+      return -1;
+    }
+    pages[i] = buf;
+
+    // init the buf content
+    char k = 0;
+    for (int j = 0; j < kPageSize; j++) {
+      pages[i][j] = static_cast<char>(k+'a');
+      k = (k + 1) % 27;
+    }
+  }
+
+  io_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  LOG(INFO) << "Setting up the io context" << std::endl;
+  if (io_setup(kMaxFileSize, &ctx) < 0) {
+    DEBUG << "Error in io_setup" << std::endl;
+  }
+
+  struct iocb **ops = (struct iocb**) malloc(sizeof(struct iocb*) * kMaxFileSize);
+  // begin to prepare every write request.
+  for (int i = 0; i < kMaxFileSize; i++) {
+    ops[i] = (struct iocb*) malloc(sizeof(struct iocb));
+    io_prep_pwrite(ops[i], fd, pages[i], kPageSize,  i * kPageSize);
+    std::cout << "align prep_pwrite = " << ops[i]->u.c.nbytes << std::endl;
+    // TODO. may set some ops[i].data = some callback calss obj.
+  }
+
+  int ret = 0;
+  if ((ret = io_submit(ctx, kMaxFileSize, ops)) != kMaxFileSize) {
+    io_destroy(ctx);
+    DEBUG << "io_submit meet error, ret = " << ret << std::endl;;
+    printf("io_submit error\n");
+    return -1;
+  }
+
+  // after submit, need to wait all write over.
+  int write_over_cnt = 0;
+  struct io_event *events = (struct io_event*)
+        malloc(sizeof(struct io_event) * kMaxFileSize);
+
+  struct timespec timeout;
+  timeout.tv_sec = 0;
+  timeout.tv_nsec = 1;
+
+  while (write_over_cnt != kMaxFileSize) {
+    constexpr int min_number = 1;
+    constexpr int max_number = kMaxFileSize;
+    int num_events = io_getevents(ctx, min_number, max_number, events, &timeout);
+    // need to call for (i = 0; i < num_events; i++) events[i].call_back();
+    write_over_cnt += num_events;
+  }
+  free(events);
+
+  // clean resource
+  for (int i = 0; i < kMaxFileSize; i++) {
+    free(ops[i]);
+  }
+  free(ops);
+  ops = nullptr;
+  io_destroy(ctx);
+  close(fd);
+  for (int i = 0; i < kMaxFileSize; i++) {
+    char *buf = pages[i];
+    free(buf);
+    pages[i] = nullptr;
+  }
+}
+
+/*
 int main(void) {
-    int input_fd;
-    const char *file_name = "DATA_0";
     io_context_t ctx;
-    struct iocb io,*p=&io;
+    struct iocb ops[kMaxReadPosition];
     struct io_event e;
     struct timespec timeout;
     memset(&ctx,0,sizeof(ctx));
@@ -22,6 +126,8 @@ int main(void) {
         printf("io_setup error\n");
         return -1;
     }
+
+    int input_fd;
     if((input_fd=open(file_name,O_RDONLY|O_DIRECT,0644))<0) {
         perror("open error");
         io_destroy(ctx);
@@ -29,7 +135,6 @@ int main(void) {
     }
 
     char *buf = nullptr;
-    constexpr size_t kPageSize = 4096;
     if (posix_memalign(reinterpret_cast<void**>(&buf), kPageSize, kPageSize)) {
       perror("posix_memalign failed!\n");
       io_destroy(ctx);
@@ -58,4 +163,10 @@ int main(void) {
     printf(" is done!\n");
     io_destroy(ctx);
     return 0;
+}
+*/
+
+int main(void) {
+  gen_file();
+  return 0;
 }
