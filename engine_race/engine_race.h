@@ -1,7 +1,7 @@
 // Copyright [2018] Alibaba Cloud All rights reserved
 #pragma once
 
-#include "engine_race/splin_lock.h"
+#include "engine_race/spin_lock.h"
 #include "include/engine.h"
 #include "engine_race/util.h"
 #include "engine_race/door_plate.h"

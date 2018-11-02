@@ -2,6 +2,7 @@
 #ifndef ENGINE_EXAMPLE_DOOR_PLATE_H_
 #define ENGINE_EXAMPLE_DOOR_PLATE_H_
 
+#include "spin_lock.h"
 #include "engine_cache.h"
 #include "data_store.h"
 
@@ -48,15 +49,21 @@ class IndexHash {
   std::unordered_map<int64_t, uint32_t> hash_;
 };
 
+
+static constexpr size_t kMaxBucketSize = 17 * 19 * 23 * 29 * 31 + 1;
+
 class HashTreeTable {
  public:
   RetCode Get(const std::string &key, Location *l);
   RetCode Set(const std::string &key, const Location &l);
-  HashTreeTable() {
-    constexpr size_t maxBucketSize = 17 * 19 * 23 * 29 * 31 + 1;
-    hash_.resize(maxBucketSize);
+  HashTreeTable(): hash_lock_(kMaxBucketSize) {
+    hash_.resize(kMaxBucketSize);
   }
   ~HashTreeTable() { }
+
+ private:
+  void LockHashShard(uint32_t index);
+  void UnlockHashShard(uint32_t index);
 
  public:
   HashTreeTable(const HashTreeTable &) = delete;
@@ -74,8 +81,9 @@ class HashTreeTable {
   };
   #pragma pack(pop)
   std::vector<std::vector<kv_info>> hash_;
+  std::vector<spinlock> hash_lock_;
  private:
-  uint64_t compute_pos(uint64_t key);
+  uint32_t compute_pos(uint64_t key);
   RetCode find(std::vector<kv_info> &vs, uint64_t key, kv_info **ptr);
 };
 

@@ -67,9 +67,19 @@ RetCode IndexHash::Set(const std::string &key, const Location &l) {
   return kSucc;
 }
 
-uint64_t HashTreeTable::compute_pos(uint64_t x) {
+// Hash tree part
+
+uint32_t HashTreeTable::compute_pos(uint64_t x) {
   // hash tree algorithm
   return (((((x % 17) * 19 + x % 19) * 23 + x % 23) * 29 + x % 29) * 31 + x % 31);
+}
+
+void HashTreeTable::LockHashShard(uint32_t index) {
+  spin_lock(hash_lock_[index]);
+}
+
+void HashTreeTable::UnlockHashShard(uint32_t index) {
+  spin_unlock(hash_lock_[index]);
 }
 
 RetCode HashTreeTable::find(std::vector<kv_info> &vs, uint64_t key, kv_info **ptr) {
@@ -87,14 +97,18 @@ RetCode HashTreeTable::Get(const std::string &key, Location *l) {
   const uint64_t array_pos = compute_pos(*k);
 
   // then begin to search this array.
+  LockHashShard(array_pos);
   auto &vs = hash_[array_pos];
   uint32_t pos = 0;
   kv_info *ptr = nullptr;
   auto ret = find(vs, *k, &ptr);
+
   if (ret == kNotFound) {
+    UnlockHashShard(array_pos);
     return kNotFound;
   }
   pos = ptr->pos;
+  UnlockHashShard(array_pos);
 
   static constexpr int split_pos = 16;
   static constexpr int value_length_bits = 12;
@@ -120,6 +134,8 @@ RetCode HashTreeTable::Set(const std::string &key, const Location &l) {
   uint32_t pos = (file_no << split_pos) | offset;
 
   const uint64_t array_pos = compute_pos(*k);
+
+  LockHashShard(array_pos);
   auto &vs = hash_[array_pos];
 
   kv_info *ptr;
@@ -130,7 +146,7 @@ RetCode HashTreeTable::Set(const std::string &key, const Location &l) {
   } else {
     ptr->pos = pos;
   }
-
+  UnlockHashShard(array_pos);
   return kSucc;
 }
 
