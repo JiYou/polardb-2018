@@ -2,9 +2,9 @@
 #ifndef ENGINE_EXAMPLE_DOOR_PLATE_H_
 #define ENGINE_EXAMPLE_DOOR_PLATE_H_
 
-#include "spin_lock.h"
-#include "engine_cache.h"
-#include "data_store.h"
+#include "engine_race/spin_lock.h"
+#include "engine_race/engine_cache.h"
+#include "engine_race/data_store.h"
 
 #include <fcntl.h>
 #include <string.h>
