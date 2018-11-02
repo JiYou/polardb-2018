@@ -56,6 +56,8 @@ class HashTreeTable {
  public:
   RetCode Get(const std::string &key, Location *l);
   RetCode Set(const std::string &key, const Location &l);
+
+ public:
   HashTreeTable(): hash_lock_(kMaxBucketSize) {
     hash_.resize(kMaxBucketSize);
   }

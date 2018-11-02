@@ -62,8 +62,6 @@ void EngineRace::WriteEntry() {
   while (!stop_) {
     write_queue_.Pop(&vs);
     // firstly, write all the content into file.
-    pthread_mutex_lock(&mu_);
-
     // write all the data.
     for (auto &x: vs) {
       Location location;
@@ -92,7 +90,6 @@ void EngineRace::WriteEntry() {
         x->cond_.notify_all();
       }
     }
-    pthread_mutex_unlock(&mu_);
   }
 }
 
@@ -101,40 +98,6 @@ void EngineRace::ReadEntry() {
   DEBUG << "db::ReadEntry()" << std::endl;
   while (!stop_) {
     read_queue_.Pop(&vs);
-/*
-    // firstly, write all the content into file.
-    pthread_mutex_lock(&mu_);
-
-    // write all the data.
-    for (auto &x: vs) {
-      Location location;
-      RetCode ret = store_.Append((x->value)->ToString(), &location);
-      if (ret == kSucc) {
-        ret = plate_.Append((x->key)->ToString(), location);
-      }
-      x->ret_code = kSucc;
-    }
-
-    // sync to disk.
-    RetCode ret = store_.Sync();
-    if (ret == kSucc) {
-      ret = plate_.Sync();
-    }
-
-    // if sync failed, change the ret code
-    // when previous set success.
-    for (auto &x: vs) {
-      if (ret != kSucc && x->ret_code == kSucc) {
-        x->ret_code = ret;
-      }
-      {
-        std::unique_lock<std::mutex> l(x->lock_);
-        x->is_done = true;
-        x->cond_.notify_all();
-      }
-    }
-    pthread_mutex_unlock(&mu_);
-*/
   }
 }
 
@@ -175,24 +138,20 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     }
   }
 
-  pthread_mutex_lock(&mu_);
   Location location;
   RetCode ret = plate_.Find(key.ToString(), &location);
   if (ret == kSucc) {
     value->clear();
     ret = store_.Read(location, value);
   }
-  pthread_mutex_unlock(&mu_);
   return ret;
 }
 
 RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
     Visitor &visitor) {
-  pthread_mutex_lock(&mu_);
   std::map<std::string, Location> locations;
   RetCode ret =  plate_.GetRangeLocation(lower.ToString(), upper.ToString(), &locations);
   if (ret != kSucc) {
-    pthread_mutex_unlock(&mu_);
     return ret;
   }
 
@@ -204,7 +163,6 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
     }
     visitor.Visit(pair.first, value);
   }
-  pthread_mutex_unlock(&mu_);
   return ret;
 }
 

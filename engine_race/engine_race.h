@@ -126,8 +126,8 @@ class EngineRace : public Engine  {
   explicit EngineRace(const std::string& dir,
                       size_t write_queue_size=kMaxQueueSize,
                       size_t read_queue_size=kMaxQueueSize)
-    : mu_(PTHREAD_MUTEX_INITIALIZER),
-    db_lock_(NULL),
+    //: mu_(PTHREAD_MUTEX_INITIALIZER),
+    : db_lock_(NULL),
     plate_(dir),
     store_(dir),
     write_queue_(write_queue_size),
@@ -152,7 +152,7 @@ class EngineRace : public Engine  {
   void start();
 
  private:
-  pthread_mutex_t mu_;
+  //pthread_mutex_t mu_;
   FileLock* db_lock_;
   DoorPlate plate_;
   DataStore store_;
