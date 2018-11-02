@@ -56,11 +56,11 @@ EngineRace::~EngineRace() {
   }
 }
 
-void EngineRace::run() {
+void EngineRace::WriteEntry() {
   std::vector<write_item*> vs;
-  DEBUG << "db::run()" << std::endl;
+  DEBUG << "db::WriteEntry()" << std::endl;
   while (!stop_) {
-    q_.Pop(&vs);
+    write_queue_.Pop(&vs);
     // firstly, write all the content into file.
     pthread_mutex_lock(&mu_);
 
@@ -97,8 +97,8 @@ void EngineRace::run() {
 }
 
 void EngineRace::start() {
-  std::thread thd(&EngineRace::run, this);
-  thd.detach();
+  std::thread write_thread_(&EngineRace::WriteEntry, this);
+  write_thread_.detach();
 }
 
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
@@ -112,7 +112,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   }
 
   write_item w(&key, &value);
-  q_.Push(&w);
+  write_queue_.Push(&w);
 
   // wait the request writen to disk.
   std::unique_lock<std::mutex> l(w.lock_);

@@ -97,9 +97,15 @@ class EngineRace : public Engine  {
  public:
   static RetCode Open(const std::string& name, Engine** eptr);
 
-  explicit EngineRace(const std::string& dir, size_t qs=kMaxQueueSize)
+  explicit EngineRace(const std::string& dir,
+                      size_t write_queue_size=kMaxQueueSize,
+                      size_t read_queue_size=kMaxQueueSize)
     : mu_(PTHREAD_MUTEX_INITIALIZER),
-    db_lock_(NULL), plate_(dir), store_(dir), q_(qs) {
+    db_lock_(NULL),
+    plate_(dir),
+    store_(dir),
+    write_queue_(write_queue_size),
+    read_queue_(read_queue_size) {
   }
 
   ~EngineRace();
@@ -115,7 +121,8 @@ class EngineRace : public Engine  {
       Visitor &visitor) override;
 
  private:
-  void run();
+  void WriteEntry();
+  void ReadEntry();
   void start();
 
  private:
@@ -125,7 +132,8 @@ class EngineRace : public Engine  {
   DataStore store_;
 
   std::atomic<bool> stop_{false};
-  Queue q_;
+  Queue write_queue_;
+  Queue read_queue_;
 };
 
 }  // namespace polar_race
