@@ -3,6 +3,7 @@
 
 #include "include/engine.h"
 #include "engine_race/engine_cache.h"
+#include "engine_race/spin_lock.h"
 #include <string.h>
 #include <unistd.h>
 
@@ -69,6 +70,11 @@ class DataStore  {
   // 160K * 8K ~= 1.28G
   // LRUCache<Location, std::string> cache_;
 
+  // record the file_no -> fd
+/*
+  spinlock fd_cache_lock_;
+  std::unordered_map<int, int> fd_cache_;
+*/
   struct file_info {
     int fd;
     uint32_t pos;

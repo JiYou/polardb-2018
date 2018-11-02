@@ -129,15 +129,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
 }
 
 RetCode EngineRace::Read(const PolarString& key, std::string* value) {
-  if (key.size() != kMaxKeyLen || value->size() != kMaxValueLen) {
-    // check the key size.
-    static bool have_find_larger_key = false;
-    if (!have_find_larger_key) {
-      DEBUG << "[WARN] have find key size = " << key.size() << ":" << " value size = " << value->size() << std::endl;
-      have_find_larger_key = true;
-    }
-  }
-
   Location location;
   RetCode ret = plate_.Find(key.ToString(), &location);
   if (ret == kSucc) {

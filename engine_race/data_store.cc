@@ -1,6 +1,7 @@
 // Copyright [2018] Alibaba Cloud All rights reserved
 #include "util.h"
 #include "data_store.h"
+#include "libaio.h"
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -130,7 +131,51 @@ RetCode DataStore::Append(const std::string& value, Location* location) {
   next_location_.offset += location->len;
   return kSucc;
 }
+/*
+static void read_page(int fd, char *buf, int file_offset) {
+    constexpr int kSingleRequest = 1;
+    constexpr int kPageSize = 4096;
 
+    // prepare the io context.
+    io_context_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    if (io_setup(1, &ctx) < 0) {
+      DEBUG << "Error in io_setup" << std::endl;
+    }
+
+    struct iocb iocb;
+    struct iocb* iocbs = &iocb;
+    io_prep_pread(&iocb, fd, buf, kPageSize, file_offset);
+    // TODO. may set some ops[i].data = some callback calss obj.
+
+    int ret = 0;
+    if ((ret = io_submit(ctx, kSingleRequest, &iocbs)) != kSingleRequest) {
+      io_destroy(ctx);
+      DEBUG << "io_submit meet error, ret = " << ret << std::endl;;
+      printf("io_submit error\n");
+      return;
+    }
+
+    // after submit, need to wait all read over.
+    int write_over_cnt = 0;
+    struct io_event events;
+
+    struct timespec timeout;
+    timeout.tv_sec = 0;
+    // one IO would take 1700ns
+    timeout.tv_nsec = 1700;
+
+    while (write_over_cnt != kSingleRequest) {
+      constexpr int min_number = 1;
+      constexpr int max_number = kSingleRequest;
+      int num_events = io_getevents(ctx, min_number, max_number, &events, &timeout);
+      // need to call for (i = 0; i < num_events; i++) events[i].call_back();
+      write_over_cnt += num_events;
+    }
+    DEBUG << "buf[0] = " << buf[0] << std::endl;
+    io_destroy(ctx);
+}
+*/
 RetCode DataStore::Read(const Location& l, std::string* value) {
   // try to find the location in cache.
   //auto is_find = cache_.Get(l, value);
@@ -138,29 +183,63 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
   //  return kSucc;
   //}
 
+/*
+  int64_t want_pos = l.offset;
+  int fd = -1;
+
+  spin_lock(fd_cache_lock_);
   auto iter = fd_cache_.find(l.file_no);
 
   // if not found. try to add it into cache.
   if (iter == fd_cache_.end()) {
-    int fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY, 0644);
+    // need to free the lock when call system call.
+    // free this hash to other thread.
+    spin_unlock(fd_cache_lock_);
+    fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY | O_DIRECT, 0644);
     if (fd < 0) {
       DEBUG << " open " << FileName(dir_, l.file_no).c_str() << " failed" << std::endl;
       return kIOError;
     }
-    auto ret = fd_cache_.emplace(std::piecewise_construct,
-                                 std::forward_as_tuple(l.file_no),
-                                 std::forward_as_tuple(fd, 0));
-    iter = ret.first;
+    spin_lock(fd_cache_lock_);
+    fd_cache_.emplace(std::piecewise_construct,
+                      std::forward_as_tuple(l.file_no),
+                      std::forward_as_tuple(fd));
+  }
+  spin_unlock(fd_cache_lock_);
+*/
+
+/*
+  fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY | O_DIRECT, 0644);
+  if (fd < 0) {
+      DEBUG << " open " << FileName(dir_, l.file_no).c_str() << " failed" << std::endl;
+  }
+  value->resize(l.len);
+  char* buf = const_cast<char*>(value->data());
+  DEBUG << "read " << FileName(dir_, l.file_no).c_str() << " : " << want_pos << std::endl;
+  read_page(fd, buf, want_pos);
+  close(fd);
+
+  // if not find,  then put it into cache.
+  //cache_.Put(l, *value);
+
+  return kSucc;
+*/
+
+  // try to find the location in cache.
+  //auto is_find = cache_.Get(l, value);
+  //if (is_find == kSucc) {
+  //  return kSucc;
+  //}
+
+  int fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY, 0644);
+  if (fd < 0) {
+    DEBUG << " open " << FileName(dir_, l.file_no).c_str() << " failed" << std::endl;
+    return kIOError;
   }
 
   // need to seek?
-  int64_t old_pos = iter->second.pos;
   int64_t want_pos = l.offset;
-  int fd = iter->second.fd;
-
-  if (l.offset != old_pos) {
-    lseek(fd, want_pos - old_pos, SEEK_CUR);
-  }
+  lseek(fd, want_pos, SEEK_SET);
 
   if (lseek(fd, 0, SEEK_CUR) != l.offset) {
     DEBUG << "cur = " << lseek(fd, 0, SEEK_CUR) << "logic = " << l.offset << std::endl;
@@ -187,8 +266,8 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
     pos += r;
     value_len -= r;
   }
-  iter->second.pos = l.offset + l.len;
 
+  close(fd);
   // if not find,  then put it into cache.
   //cache_.Put(l, *value);
 

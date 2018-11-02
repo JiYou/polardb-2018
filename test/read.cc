@@ -59,6 +59,7 @@ void read_thread(Engine *engine, char begin_char) {
                   for (int i = 0; i < X.length(); i++) {
                     if (X[i] != 'a') {
                       std::cout << "pos:" << i << ",val=" << X[i] << std::endl;
+                      assert (0);
                     }
                   }
                 }
