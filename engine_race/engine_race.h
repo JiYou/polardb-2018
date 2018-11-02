@@ -26,7 +26,7 @@
 
 namespace polar_race {
 
-static constexpr size_t kMaxQueueSize = 4096; // 4K * 4Kitem ~= 16MB
+static constexpr size_t kMaxQueueSize = 256; // 4K * 4Kitem ~= 16MB
 static constexpr size_t kMaxFlushItem = 64;   // because there are 64 threads r/w.
 
 struct write_item {

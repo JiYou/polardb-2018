@@ -41,8 +41,6 @@ namespace std {
 namespace polar_race {
 // begin of namespace polar_race
 
-// TODO
-// add file_no -> file_fd
 class DataStore  {
  public:
   explicit DataStore(const std::string dir);
