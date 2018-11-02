@@ -48,6 +48,26 @@ struct write_item {
   }
 };
 
+struct read_item {
+  const PolarString *key = nullptr;
+  std::string *value = nullptr;
+
+  RetCode ret_code = kSucc;
+  bool is_done = false;
+  std::mutex lock_;
+  std::condition_variable cond_;
+
+  read_item(const PolarString *pkey, std::string *pvalue) :
+    key(pkey), value(pvalue) {
+  }
+
+  void wait_done() {
+    std::unique_lock<std::mutex> l(lock_);
+    cond_.wait(l, [&] { return is_done; } );
+  }
+};
+
+template<typename KVItem>
 class Queue {
   public:
     Queue(size_t cap): cap_(cap) { }
@@ -56,7 +76,7 @@ class Queue {
     // the address of write_item maybe local variable
     // in the stack, so the caller must wait before
     // it return from stack-function.
-    void Push(write_item *w) {
+    void Push(KVItem *w) {
       // check the queue is full or not.
       std::unique_lock<std::mutex> l(qlock_);
       // check full or not.
@@ -65,10 +85,16 @@ class Queue {
       consume_.notify_all();
     }
 
-    void Pop(std::vector<write_item*> *vs) {
+    /*
+     * because the read is random, wait maybe not that effective.
+     * but for write, if more data flushed by one time.
+     * it maybe faster that flush 2 times.
+     * So, if find the items are smaller, wait for some nano seconds.
+     */
+    void Pop(std::vector<KVItem*> *vs, bool is_write=true) {
         // wait for more write here.
         qlock_.lock();
-        if (q_.size() < kMaxFlushItem) {
+        if (q_.size() < kMaxFlushItem && is_write) {
           qlock_.unlock();
           // do something here.
           // is some reader blocked on the request?
@@ -86,7 +112,7 @@ class Queue {
         produce_.notify_all();
     }
   private:
-    std::deque<write_item*> q_;
+    std::deque<KVItem*> q_;
     std::mutex qlock_;
     std::condition_variable produce_;
     std::condition_variable consume_;
@@ -132,8 +158,8 @@ class EngineRace : public Engine  {
   DataStore store_;
 
   std::atomic<bool> stop_{false};
-  Queue write_queue_;
-  Queue read_queue_;
+  Queue<write_item> write_queue_;
+  Queue<read_item> read_queue_;
 };
 
 }  // namespace polar_race

@@ -5,7 +5,6 @@
 #include "engine_cache.h"
 #include "data_store.h"
 
-
 #include <fcntl.h>
 #include <string.h>
 #include <stdint.h>
@@ -16,7 +15,8 @@
 
 namespace polar_race {
 
-static const uint32_t kMaxKeyLen = 8;
+static constexpr uint32_t kMaxKeyLen = 8;
+static constexpr uint32_t kMaxValueLen = 4096;
 
 // Item to write on the META file.
 // for the memory hash map.

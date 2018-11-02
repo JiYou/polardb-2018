@@ -96,13 +96,58 @@ void EngineRace::WriteEntry() {
   }
 }
 
+void EngineRace::ReadEntry() {
+  std::vector<read_item*> vs;
+  DEBUG << "db::ReadEntry()" << std::endl;
+  while (!stop_) {
+    read_queue_.Pop(&vs);
+/*
+    // firstly, write all the content into file.
+    pthread_mutex_lock(&mu_);
+
+    // write all the data.
+    for (auto &x: vs) {
+      Location location;
+      RetCode ret = store_.Append((x->value)->ToString(), &location);
+      if (ret == kSucc) {
+        ret = plate_.Append((x->key)->ToString(), location);
+      }
+      x->ret_code = kSucc;
+    }
+
+    // sync to disk.
+    RetCode ret = store_.Sync();
+    if (ret == kSucc) {
+      ret = plate_.Sync();
+    }
+
+    // if sync failed, change the ret code
+    // when previous set success.
+    for (auto &x: vs) {
+      if (ret != kSucc && x->ret_code == kSucc) {
+        x->ret_code = ret;
+      }
+      {
+        std::unique_lock<std::mutex> l(x->lock_);
+        x->is_done = true;
+        x->cond_.notify_all();
+      }
+    }
+    pthread_mutex_unlock(&mu_);
+*/
+  }
+}
+
 void EngineRace::start() {
   std::thread write_thread_(&EngineRace::WriteEntry, this);
   write_thread_.detach();
+
+  std::thread read_thread_(&EngineRace::ReadEntry, this);
+  read_thread_.detach();
 }
 
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
-  if (key.size() != 8 || value.size() != 4096) {
+  if (key.size() != kMaxKeyLen || value.size() != kMaxValueLen) {
     // check the key size.
     static bool have_find_larger_key = false;
     if (!have_find_larger_key) {
@@ -121,6 +166,15 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
 }
 
 RetCode EngineRace::Read(const PolarString& key, std::string* value) {
+  if (key.size() != kMaxKeyLen || value->size() != kMaxValueLen) {
+    // check the key size.
+    static bool have_find_larger_key = false;
+    if (!have_find_larger_key) {
+      DEBUG << "[WARN] have find key size = " << key.size() << ":" << " value size = " << value->size() << std::endl;
+      have_find_larger_key = true;
+    }
+  }
+
   pthread_mutex_lock(&mu_);
   Location location;
   RetCode ret = plate_.Find(key.ToString(), &location);
