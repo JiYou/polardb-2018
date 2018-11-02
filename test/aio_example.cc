@@ -103,20 +103,26 @@ class AIOAdder : public Adder {
   void Init() {
     LOG(INFO) << "Opening file";
     fd_ = open(path.c_str(), O_RDWR | O_DIRECT | O_CREAT, 0644);
-    // PCHECK(fd_ >= 0) << "Error opening file";
-    LOG(INFO) << "Allocating enough space for the sum";
-    // PCHECK(fallocate(fd_, 0, 0, kPageSize * length_) >= 0) << "Error in fallocate";
-    LOG(INFO) << "Setting up the io context";
-    // PCHECK(io_setup(100, &ioctx_) >= 0) << "Error in io_setup";
+    if (fd_ < 0) {
+      DEBUG << "Error opening file" << std::endl;
+    }
+    LOG(INFO) << "Allocating enough space for the sum" << std::endl;
+    if (fallocate(fd_, 0, 0, kPageSize * length_) < 0) {
+      DEBUG << "Error in fallocate" << std::endl;
+    }
+    LOG(INFO) << "Setting up the io context" << std::endl;
+    if (io_setup(100, &ioctx_) < 0) {
+      DEBUG << "Error in io_setup" << std::endl;
+    }
   }
 
   virtual void Add(int amount) {
     sum_ += amount;
-    LOG(INFO) << "Adding " << amount << " for a total of " << sum_;
+    LOG(INFO) << "Adding " << amount << " for a total of " << sum_ << std::endl;
   }
 
   void SubmitWrite() {
-    LOG(INFO) << "Submitting a write to " << counter_;
+    LOG(INFO) << "Submitting a write to " << counter_ << std::endl;
     struct iocb iocb;
     struct iocb* iocbs = &iocb;
     AIORequest *req = new AIOWriteRequest(counter_);
@@ -136,7 +142,7 @@ class AIOAdder : public Adder {
   }
 
   void SubmitRead() {
-    LOG(INFO) << "Submitting a read from " << counter_;
+    LOG(INFO) << "Submitting a read from " << counter_ << std::endl;
     struct iocb iocb;
     struct iocb* iocbs = &iocb;
     AIORequest *req = new AIOReadRequest(this);
@@ -157,16 +163,16 @@ class AIOAdder : public Adder {
 
   int DoReap(int min_nr) {
     LOG(INFO) << "Reaping between " << min_nr << " and "
-              << max_nr << " io_events";
+              << max_nr << " io_events" << std::endl;
     struct io_event* events = new io_event[max_nr];
     struct timespec timeout;
     timeout.tv_sec = 0;
     timeout.tv_nsec = 100000000;
     int num_events;
-    LOG(INFO) << "Calling io_getevents";
+    LOG(INFO) << "Calling io_getevents" << std::endl;;
     num_events = io_getevents(ioctx_, min_nr, max_nr, events,
                               &timeout);
-    LOG(INFO) << "Calling completion function on results";
+    LOG(INFO) << "Calling completion function on results" << std::endl;
     for (int i = 0; i < num_events; i++) {
       struct io_event event = events[i];
       AIORequest* req = static_cast<AIORequest*>(event.data);
@@ -174,7 +180,7 @@ class AIOAdder : public Adder {
       delete req;
     }
     delete events;
-    LOG(INFO) << "Reaped " << num_events << " io_events";
+    LOG(INFO) << "Reaped " << num_events << " io_events" << std::endl;
     reap_counter_ += num_events;
     return num_events;
   }
@@ -192,15 +198,15 @@ class AIOAdder : public Adder {
   }
 
   ~AIOAdder() {
-    LOG(INFO) << "Closing AIO context and file";
+    LOG(INFO) << "Closing AIO context and file" << std::endl;
     io_destroy(ioctx_);
     close(fd_);
   }
 
   int Sum() {
-    LOG(INFO) << "Writing consecutive integers to file";
+    LOG(INFO) << "Writing consecutive integers to file" << std::endl;
     WriteFile();
-    LOG(INFO) << "Reading consecutive integers from file";
+    LOG(INFO) << "Reading consecutive integers from file" << std::endl;
     ReadFile();
     return sum_;
   }
@@ -211,7 +217,7 @@ int main(int argc, char* argv[]) {
   adder.Init();
   int sum = adder.Sum();
   int expected = (file_size * (file_size - 1)) / 2;
-  LOG(INFO) << "AIO is complete";
+  LOG(INFO) << "AIO is complete" << std::endl;
   CHECK_EQ(sum, expected); //  << "Expected " << expected << " Got " << sum;
   printf("Successfully calculated that the sum of integers from 0"
          " to %d is %d\n", file_size - 1, sum);

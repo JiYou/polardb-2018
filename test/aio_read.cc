@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 
+constexpr int kMaxAIOEvents = 64;
 
 int main(void) {
     int input_fd;
@@ -17,7 +18,7 @@ int main(void) {
     struct timespec timeout;
     memset(&ctx,0,sizeof(ctx));
 
-    if(io_setup(10, &ctx)!=0) {
+    if(io_setup(64, &ctx)!=0) {
         printf("io_setup error\n");
         return -1;
     }
@@ -42,15 +43,17 @@ int main(void) {
         printf("io_submit error\n");
         return -1;
     }
+
+    timeout.tv_sec=0;
+    timeout.tv_nsec=10;
+
     while(1) {
-        timeout.tv_sec=0;
-        timeout.tv_nsec=500000000;//0.5s
+        // timeout.tv_nsec = 999999999;
         if(io_getevents(ctx,0,1,&e,&timeout)==1) {
             close(input_fd);
             break;
         }
-        printf("haven't done\n");
-        sleep(1);
+        // printf("haven't done\n");
     }
     printf(" is done!\n");
     io_destroy(ctx);
