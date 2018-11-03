@@ -132,7 +132,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   Location location;
   RetCode ret = plate_.Find(key.ToString(), &location);
   if (ret == kSucc) {
-    value->clear();
     ret = store_.Read(location, value);
   }
   return ret;
