@@ -9,6 +9,7 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <pthread.h>
 
 #include <chrono>
 #include <thread>
@@ -19,10 +20,10 @@
 #include <vector>
 #include <atomic>
 
-#include <pthread.h>
 #include <string>
 #include <queue>
 #include <map>
+
 
 namespace polar_race {
 
