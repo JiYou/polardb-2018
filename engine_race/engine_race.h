@@ -26,44 +26,6 @@
 
 namespace polar_race {
 
-struct write_item {
-  const PolarString *key = nullptr;
-  const PolarString *value = nullptr;
-
-  RetCode ret_code = kSucc;
-  bool is_done = false;
-  std::mutex lock_;
-  std::condition_variable cond_;
-
-  write_item(const PolarString *pkey, const PolarString *pvalue) :
-    key(pkey), value(pvalue) {
-  }
-
-  void wait_done() {
-    std::unique_lock<std::mutex> l(lock_);
-    cond_.wait(l, [&] { return is_done; } );
-  }
-};
-
-struct read_item {
-  const PolarString *key = nullptr;
-  std::string *value = nullptr;
-
-  RetCode ret_code = kSucc;
-  bool is_done = false;
-  std::mutex lock_;
-  std::condition_variable cond_;
-
-  read_item(const PolarString *pkey, std::string *pvalue) :
-    key(pkey), value(pvalue) {
-  }
-
-  void wait_done() {
-    std::unique_lock<std::mutex> l(lock_);
-    cond_.wait(l, [&] { return is_done; } );
-  }
-};
-
 template<typename KVItem>
 class Queue {
   public:

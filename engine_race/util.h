@@ -1,11 +1,26 @@
 // Copyright [2018] Alibaba Cloud All rights reserved
 #ifndef ENGINE_SIMPLE_UTIL_H_
 #define ENGINE_SIMPLE_UTIL_H_
+
+#include "include/polar_string.h"
+#include "include/engine.h"
+
+#include <assert.h>
 #include <stdint.h>
 #include <pthread.h>
-#include <string>
+
+#include <chrono>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <iostream>
+#include <deque>
 #include <vector>
-#include<iostream>
+#include <atomic>
+
+#include <string>
+#include <queue>
+#include <map>
 
 // Is use read queue?
 #define READ_QUEUE 0
@@ -26,6 +41,45 @@ constexpr int kSplitPos = 16;
 constexpr int kValueLengthBits = 12;  // stands for 4K
 constexpr size_t kMaxQueueSize = 256; // 4K * 4Kitem ~= 16MB
 constexpr size_t kMaxFlushItem = 64;   // because there are 64 threads r/w.
+
+struct write_item {
+  const PolarString *key = nullptr;
+  const PolarString *value = nullptr;
+
+  RetCode ret_code = kSucc;
+  bool is_done = false;
+  std::mutex lock_;
+  std::condition_variable cond_;
+
+  write_item(const PolarString *pkey, const PolarString *pvalue) :
+    key(pkey), value(pvalue) {
+  }
+
+  void wait_done() {
+    std::unique_lock<std::mutex> l(lock_);
+    cond_.wait(l, [&] { return is_done; } );
+  }
+};
+
+struct read_item {
+  const PolarString *key = nullptr;
+  std::string *value = nullptr;
+
+  RetCode ret_code = kSucc;
+  bool is_done = false;
+  std::mutex lock_;
+  std::condition_variable cond_;
+
+  read_item(const PolarString *pkey, std::string *pvalue) :
+    key(pkey), value(pvalue) {
+  }
+
+  void wait_done() {
+    std::unique_lock<std::mutex> l(lock_);
+    cond_.wait(l, [&] { return is_done; } );
+  }
+};
+
 
 // Hash
 uint32_t StrHash(const char* s, int size);
