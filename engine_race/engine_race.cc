@@ -95,10 +95,43 @@ void EngineRace::WriteEntry() {
 
 #ifdef READ_QUEUE
 void EngineRace::ReadEntry() {
-  std::vector<read_item*> vs(64, nullptr);
+  std::vector<read_item*> to_read(64, nullptr);
+  std::vector<Location> file_pos(64);
   DEBUG << "db::ReadEntry()" << std::endl;
+
+  to_read.resize(0);
+  file_pos.resize(0);
+
   while (!stop_) {
-    read_queue_.Pop(&vs);
+    read_queue_.Pop(&to_read);
+    // get all the request.
+    // then begin to find the location.
+    // NOTE: here maybe some items can not be found.
+    size_t to_index = 0;
+    file_pos.resize(to_read.size());
+    for (size_t i = 0; i < to_read.size(); i++) {
+      auto &x = to_read[i];
+      auto ret = plate_.Find((x->key)->ToString(), &file_pos[i]);
+      if (ret == kNotFound) {
+        std::unique_lock<std::mutex> l(x->lock_);
+        x->is_done = true;
+        x->cond_.notify_all();
+      } else {
+        if (to_index != i) {
+          to_read[to_index] = x;
+          file_pos[to_index] = file_pos[i];
+        }
+        // if is the index == i, skip copy.
+        to_index++;
+      }
+    }
+
+    // batch job submit to data-> get value.
+    // TODO: add interface in data for batch update.
+    to_read.resize(to_index);
+    file_pos.resize(to_index);
+    // store_.BatchRead(to_read, file_pos);
+
   }
 }
 #endif
