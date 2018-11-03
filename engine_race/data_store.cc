@@ -40,6 +40,10 @@ DataStore::~DataStore() {
   if (fd_ > 0) {
     close(fd_);
   }
+
+  for (auto &x: fd_cache_) {
+    close(x.second);
+  }
 }
 
 RetCode DataStore::Init() {
@@ -181,13 +185,13 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
       DEBUG << "posix_memalign failed!\n";
     }
   }
-/*
+
+  int fd = -1;
   spin_lock(fd_cache_lock_);
   auto iter = fd_cache_.find(l.file_no);
 
-  int fd = -1;
-  // if not found. try to add it into cache.
   if (iter == fd_cache_.end()) {
+    // if not found. try to add it into cache.
     // need to free the lock when call system call.
     // free this hash to other thread.
     spin_unlock(fd_cache_lock_);
@@ -205,13 +209,10 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
   }
   fd = iter->second;
   spin_unlock(fd_cache_lock_);
-*/
-  int fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY | O_DIRECT, 0644);
 
   value->clear();
   value->resize(l.len);
   read_page(fd, buf, l.offset);
-  close(fd);
 
   // manual memcpy
   uint64_t *to = reinterpret_cast<uint64_t*>(const_cast<char*>(value->data()));
