@@ -23,7 +23,9 @@ static std::atomic<int> write_cnt {0};
 void write_thread(Engine *engine, char begin_char) {
   int cnt = 0;
   char V[4096];
-  memset(V, 'a', sizeof(V));
+  for (int i = 0; i < 4096; i++) {
+    V[i] = (i % 26) + 'a';
+  }
 
   std::string front;
   front += begin_char;

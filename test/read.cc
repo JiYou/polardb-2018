@@ -23,7 +23,9 @@ static std::atomic<int> write_cnt {0};
 void read_thread(Engine *engine, char begin_char) {
   int cnt = 0;
   char V[4096];
-  memset(V, 'a', sizeof(V));
+  for (int i = 0; i < 4096; i++) {
+    V[i] = (i % 26) + 'a';
+  }
 
   std::string front;
   front += begin_char;
@@ -54,14 +56,20 @@ void read_thread(Engine *engine, char begin_char) {
                 assert (ret == kSucc);
                 auto cret = memcmp(V, X.c_str(), 4096);
                 if (cret != 0) {
-                  std::cout << G << std::endl;
-                  std::cout << "ret = " << cret << std::endl;
-                  for (int i = 0; i < X.length(); i++) {
-                    if (X[i] != 'a') {
-                      std::cout << "pos:" << i << ",val=" << X[i] << std::endl;
-                      assert (0);
-                    }
+                  std::cout << "k = " << G << std::endl;
+                  std::cout << "want v = ";
+                  int start = 0;
+                  for (int i = 0; i < 20; i++) {
+                    char x = (i % 26) + 'a';
+                    std::cout << x;
                   }
+                  std::cout << std::endl;
+
+                  std::cout << "get v  = ";
+                  for (int i = 0; i < 20; i++) {
+                    std::cout << X[i];
+                  }
+                  std::cout << std::endl;
                 }
                 assert (cret == 0);
               }

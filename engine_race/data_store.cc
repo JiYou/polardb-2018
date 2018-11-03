@@ -233,7 +233,7 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
   uint64_t *to = reinterpret_cast<uint64_t*>(const_cast<char*>(value->data()));
   uint64_t *from = reinterpret_cast<uint64_t*>(buf);
   for (int i = 0; i < 512; i++) {
-    *to++ = *from;
+    *to++ = *from++;
   }
 
   return kSucc;
