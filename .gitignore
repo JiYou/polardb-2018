@@ -17,3 +17,22 @@ doc/*.pdf
 doc/*.doc
 doc/*.docx
 
+test/DATA_0
+test/aio_example
+test/aio_read
+test/aio_read.cc.orig
+test/cpp_prod_test
+test/data_aio
+test/file_truncate
+test/office_test
+test/prod_test
+test/read
+test/single_aio
+test/test
+test/thd_aio
+test/thread_local
+test/truncate_test
+test/write
+test/write.log.q
+test/write.log.seq
+test/write.old.log.2
