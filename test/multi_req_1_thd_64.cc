@@ -39,19 +39,9 @@ constexpr int kPageSize = 4096;
  * - submit the 1000 io request.
  * - wait the write over.
  */
-int aio_read_example(io_context_t &ctx, int &fd) {
-  // alloc the memory
-  char *pages[kMaxFileSize];
-  for (int i = 0; i < kMaxFileSize; i++) {
-    char *buf = nullptr;
-    if (posix_memalign(reinterpret_cast<void**>(&buf), kPageSize, kPageSize)) {
-      perror("posix_memalign failed!\n");
-      return -1;
-    }
-    memset(buf, 0, sizeof(buf));
-    pages[i] = buf;
-  }
 
+char *pages[kMaxFileSize];
+int aio_read_example(io_context_t &ctx, int &fd) {
 
   struct iocb **ops = (struct iocb**) malloc(sizeof(struct iocb*) * kMaxFileSize);
   // begin to prepare every write request.
@@ -95,11 +85,6 @@ int aio_read_example(io_context_t &ctx, int &fd) {
   }
   free(ops);
   ops = nullptr;
-  for (int i = 0; i < kMaxFileSize; i++) {
-    char *buf = pages[i];
-    free(buf);
-    pages[i] = nullptr;
-  }
 }
 
 int main(void) {
@@ -120,9 +105,25 @@ int main(void) {
     return 0;
   }
 
+  // alloc the memory
+  for (int i = 0; i < kMaxFileSize; i++) {
+    char *buf = nullptr;
+    if (posix_memalign(reinterpret_cast<void**>(&buf), kPageSize, kPageSize)) {
+      perror("posix_memalign failed!\n");
+      return -1;
+    }
+    memset(buf, 0, sizeof(buf));
+    pages[i] = buf;
+  }
 
   for (int i = 0; i < 100000; i++) {
     aio_read_example(ctx, fd);
+  }
+
+  for (int i = 0; i < kMaxFileSize; i++) {
+    char *buf = pages[i];
+    free(buf);
+    pages[i] = nullptr;
   }
 
   close(fd);

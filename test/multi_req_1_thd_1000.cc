@@ -57,7 +57,8 @@ int aio_read_example(io_context_t &ctx, int &fd) {
   // begin to prepare every write request.
   for (int i = 0; i < kMaxFileSize; i++) {
     ops[i] = (struct iocb*) malloc(sizeof(struct iocb));
-    io_prep_pread(ops[i], fd, pages[i], kPageSize, i * kPageSize);
+    auto idx = (static_cast<uint32_t>(random()) % 2048);
+    io_prep_pread(ops[i], fd, pages[i], kPageSize, idx * kPageSize);
     // TODO. may set some ops[i].data = some callback calss obj.
   }
 
