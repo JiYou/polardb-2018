@@ -22,7 +22,6 @@ namespace polar_race {
 
 static const std::string kMetaDirName = "index";
 static const char kMetaFileNamePrefix[] = "META_";
-static constexpr int kMetaFileNamePrefixLen = 5;
 static const int kSingleFileSize = 1024 * 1024 * 100;  // 100MB
 
 // IndexHash
@@ -33,29 +32,25 @@ RetCode IndexHash::Get(const std::string &key, Location *l) {
     return kNotFound;
   }
 
-  static constexpr int split_pos = 16;
-  static constexpr int value_length_bits = 12;
   uint32_t pos = iter->second;
   // 16bit|16bit = 32bit;
   // the first 16bit is stands for file_no
   // the second 16bit stands for offset /4K
-  uint16_t file_no = pos >> split_pos;
-  uint32_t offset = (pos & 0xffff) << value_length_bits;
+  uint16_t file_no = pos >> kSplitPos;
+  uint32_t offset = (pos & 0xffff) << kValueLengthBits;
 
   l->file_no = file_no;
   l->offset = offset;
-  l->len = 1 << value_length_bits;
+  l->len = 1 << kValueLengthBits;
   return kSucc;
 }
 
 RetCode IndexHash::Set(const std::string &key, const Location &l) {
   const int64_t *k = reinterpret_cast<const int64_t*>(key.data());
-  static constexpr int split_pos = 16;
-  static constexpr int value_length_bits = 12;
 
   uint32_t file_no = l.file_no;
-  uint32_t offset = l.offset >> value_length_bits;
-  uint32_t pos = (file_no << split_pos) | offset;
+  uint32_t offset = l.offset >> kValueLengthBits;
+  uint32_t pos = (file_no << kSplitPos) | offset;
 
   auto ret = hash_.emplace(std::piecewise_construct,
                                std::forward_as_tuple(*k),
@@ -110,28 +105,24 @@ RetCode HashTreeTable::Get(const std::string &key, Location *l) {
   pos = ptr->pos;
   UnlockHashShard(array_pos);
 
-  static constexpr int split_pos = 16;
-  static constexpr int value_length_bits = 12;
   // 16bit|16bit = 32bit;
   // the first 16bit is stands for file_no
   // the second 16bit stands for offset /4K
-  uint16_t file_no = pos >> split_pos;
-  uint32_t offset = (pos & 0xffff) << value_length_bits;
+  uint16_t file_no = pos >> kSplitPos;
+  uint32_t offset = (pos & 0xffff) << kValueLengthBits;
 
   l->file_no = file_no;
   l->offset = offset;
-  l->len = 1 << value_length_bits;
+  l->len = 1 << kValueLengthBits;
   return kSucc;
 }
 
 RetCode HashTreeTable::Set(const std::string &key, const Location &l) {
   const int64_t *k = reinterpret_cast<const int64_t*>(key.data());
-  static constexpr int split_pos = 16;
-  static constexpr int value_length_bits = 12;
 
   uint32_t file_no = l.file_no;
-  uint32_t offset = l.offset >> value_length_bits;
-  uint32_t pos = (file_no << split_pos) | offset;
+  uint32_t offset = l.offset >> kValueLengthBits;
+  uint32_t pos = (file_no << kSplitPos) | offset;
 
   const uint64_t array_pos = compute_pos(*k);
 

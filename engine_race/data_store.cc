@@ -156,9 +156,6 @@ RetCode DataStore::Append(const std::string& value, Location* location) {
 }
 
 static void read_page(int fd, char *buf, int file_offset) {
-    constexpr int kSingleRequest = 1;
-    constexpr int kPageSize = 4096;
-
     // prepare the io context.
     io_context_t ctx;
     memset(&ctx, 0, sizeof(ctx));
@@ -189,9 +186,8 @@ static void read_page(int fd, char *buf, int file_offset) {
     timeout.tv_nsec = 1700;
 
     while (write_over_cnt != kSingleRequest) {
-      constexpr int min_number = 1;
       constexpr int max_number = kSingleRequest;
-      int num_events = io_getevents(ctx, min_number, max_number, &events, &timeout);
+      int num_events = io_getevents(ctx, kMinNumber, max_number, &events, &timeout);
       // need to call for (i = 0; i < num_events; i++) events[i].call_back();
       write_over_cnt += num_events;
     }
@@ -200,7 +196,6 @@ static void read_page(int fd, char *buf, int file_offset) {
 
 RetCode DataStore::Read(const Location& l, std::string* value) {
   static thread_local char *buf = nullptr;
-  constexpr int kPageSize = 4096;
 
   // !!! must align, do not use value->data() directly.
   if (!buf) {

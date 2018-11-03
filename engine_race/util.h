@@ -11,6 +11,18 @@
 
 namespace polar_race {
 
+constexpr uint32_t kMaxKeyLen = 8;
+constexpr uint32_t kMaxValueLen = 4096;
+constexpr size_t kMaxBucketSize = 17 * 19 * 23 * 29 * 31 + 1;
+constexpr int kSingleRequest = 1;
+constexpr int kMinNumber = 1;
+constexpr int kPageSize = 4096;
+constexpr int kMetaFileNamePrefixLen = 5;
+constexpr int kSplitPos = 16;
+constexpr int kValueLengthBits = 12;  // stands for 4K
+constexpr size_t kMaxQueueSize = 256; // 4K * 4Kitem ~= 16MB
+constexpr size_t kMaxFlushItem = 64;   // because there are 64 threads r/w.
+
 // Hash
 uint32_t StrHash(const char* s, int size);
 

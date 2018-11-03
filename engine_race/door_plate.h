@@ -16,9 +16,6 @@
 
 namespace polar_race {
 
-static constexpr uint32_t kMaxKeyLen = 8;
-static constexpr uint32_t kMaxValueLen = 4096;
-
 // Item to write on the META file.
 // for the memory hash map.
 // Just need to record
@@ -49,8 +46,6 @@ class IndexHash {
   std::unordered_map<int64_t, uint32_t> hash_;
 };
 
-
-static constexpr size_t kMaxBucketSize = 17 * 19 * 23 * 29 * 31 + 1;
 
 class HashTreeTable {
  public:
