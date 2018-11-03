@@ -95,6 +95,7 @@ RetCode DataStore::Init() {
       fd_cache_[no] = open(path.c_str(), O_RDONLY | O_DIRECT, 0644);
       if (fd_cache_[no] < 0) {
         DEBUG << "open file failed" << std::endl;
+        fd_cache_[no] = 0;
       }
     }
   }
@@ -211,7 +212,7 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
   int fd = -1;
 
   bool to_close = false;
-  if (l.file_no > fd_cache_num_ || !fd_cache_[l.file_no]) {
+  if (l.file_no >= fd_cache_num_ || !fd_cache_[l.file_no]) {
     fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY | O_DIRECT, 0644);
     if (fd < 0) {
       DEBUG << " open " << FileName(dir_, l.file_no).c_str() << " failed" << std::endl;
