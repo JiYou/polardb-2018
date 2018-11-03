@@ -2,6 +2,9 @@
 /*
  * Try to write libaio like fio.
  * FIO: random read:  **Result** = 87268.80iops 340.89MB/s 64threads. io-depth=1
+ * - 64 threads
+ * - io-depth=1
+ * - submit every 1 read IO every time.
  */
 #include "engine_race/libaio.h"
 
