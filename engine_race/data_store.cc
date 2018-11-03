@@ -41,8 +41,10 @@ DataStore::~DataStore() {
     close(fd_);
   }
 
-  for (auto &x: fd_cache_) {
-    close(x.second);
+  for (int i = 0; i < fd_cache_num_; i++) {
+    if (fd_cache_[i]) {
+      close(fd_cache_[i]);
+    }
   }
 }
 
@@ -65,15 +67,35 @@ RetCode DataStore::Init() {
   uint32_t cur_offset = 0;
 
   // Get the last data file no
-  std::string sindex;
-  std::vector<std::string>::iterator it;
-  for (it = files.begin(); it != files.end(); ++it) {
-    if ((*it).compare(0, kDataFilePrefixLen, kDataFilePrefix) != 0) {
+  for (auto &fn: files) {
+    if (fn.compare(0, kDataFilePrefixLen, kDataFilePrefix) != 0) {
       continue;
+    } else {
+      uint32_t no = std::atoi(fn.c_str() + kDataFilePrefixLen);
+      if (no > last_no) {
+        last_no = no;
+      }
     }
-    sindex = (*it).substr(kDataFilePrefixLen);
-    if (std::stoul(sindex) > last_no) {
-      last_no = std::stoi(sindex);
+  }
+  // alloc the memory
+  fd_cache_ = (int *) malloc(sizeof(int) * (last_no + 1));
+  if (!fd_cache_) {
+    DEBUG << "fd_cache_ is empty nullptr" << std::endl;
+  }
+  memset(fd_cache_, 0, sizeof(int) * (last_no + 1));
+  fd_cache_num_ = last_no + 1;
+
+  // open all the files into hash
+  for (auto &fn: files) {
+    if (fn.compare(0, kDataFilePrefixLen, kDataFilePrefix) != 0) {
+      continue;
+    } else {
+      int no = std::atoi(fn.c_str() + kDataFilePrefixLen);
+      auto path = FileName(dir_, no);
+      fd_cache_[no] = open(path.c_str(), O_RDONLY | O_DIRECT, 0644);
+      if (fd_cache_[no] < 0) {
+        DEBUG << "open file failed" << std::endl;
+      }
     }
   }
 
@@ -187,32 +209,25 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
   }
 
   int fd = -1;
-  spin_lock(fd_cache_lock_);
-  auto iter = fd_cache_.find(l.file_no);
 
-  if (iter == fd_cache_.end()) {
-    // if not found. try to add it into cache.
-    // need to free the lock when call system call.
-    // free this hash to other thread.
-    spin_unlock(fd_cache_lock_);
+  bool to_close = false;
+  if (l.file_no > fd_cache_num_ || !fd_cache_[l.file_no]) {
     fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY | O_DIRECT, 0644);
     if (fd < 0) {
       DEBUG << " open " << FileName(dir_, l.file_no).c_str() << " failed" << std::endl;
       return kIOError;
     }
-    spin_lock(fd_cache_lock_);
-    auto ret = fd_cache_.emplace(std::piecewise_construct,
-                                 std::forward_as_tuple(l.file_no),
-                                 std::forward_as_tuple(fd));
-    iter = ret.first;
-    DEBUG << "fd_cache_.size() = " << fd_cache_.size() << std::endl;
+    to_close = true;
+  } else {
+    fd = fd_cache_[l.file_no];
   }
-  fd = iter->second;
-  spin_unlock(fd_cache_lock_);
 
   value->clear();
   value->resize(l.len);
   read_page(fd, buf, l.offset);
+  if (to_close) {
+    close(fd);
+  }
 
   // manual memcpy
   uint64_t *to = reinterpret_cast<uint64_t*>(const_cast<char*>(value->data()));

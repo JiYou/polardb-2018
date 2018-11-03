@@ -70,8 +70,8 @@ class DataStore  {
   // 160K * 8K ~= 1.28G
   // LRUCache<Location, std::string> cache_;
 
-  spinlock fd_cache_lock_;
-  std::unordered_map<int, int> fd_cache_;
+  int fd_cache_num_ = 0;
+  int *fd_cache_ = nullptr;
 
   RetCode OpenCurFile();
 };
