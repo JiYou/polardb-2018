@@ -57,7 +57,7 @@ EngineRace::~EngineRace() {
 }
 
 void EngineRace::WriteEntry() {
-  std::vector<write_item*> vs;
+  std::vector<write_item*> vs(64, nullptr);
   DEBUG << "db::WriteEntry()" << std::endl;
   while (!stop_) {
     write_queue_.Pop(&vs);
@@ -94,7 +94,7 @@ void EngineRace::WriteEntry() {
 }
 
 void EngineRace::ReadEntry() {
-  std::vector<read_item*> vs;
+  std::vector<read_item*> vs(64, nullptr);
   DEBUG << "db::ReadEntry()" << std::endl;
   while (!stop_) {
     read_queue_.Pop(&vs);
