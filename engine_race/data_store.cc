@@ -40,10 +40,6 @@ DataStore::~DataStore() {
   if (fd_ > 0) {
     close(fd_);
   }
-
-  for (auto &item: fd_cache_) {
-    close(item.second.fd);
-  }
 }
 
 RetCode DataStore::Init() {
@@ -131,7 +127,7 @@ RetCode DataStore::Append(const std::string& value, Location* location) {
   next_location_.offset += location->len;
   return kSucc;
 }
-/*
+
 static void read_page(int fd, char *buf, int file_offset) {
     constexpr int kSingleRequest = 1;
     constexpr int kPageSize = 4096;
@@ -172,24 +168,24 @@ static void read_page(int fd, char *buf, int file_offset) {
       // need to call for (i = 0; i < num_events; i++) events[i].call_back();
       write_over_cnt += num_events;
     }
-    DEBUG << "buf[0] = " << buf[0] << std::endl;
     io_destroy(ctx);
 }
-*/
+
 RetCode DataStore::Read(const Location& l, std::string* value) {
-  // try to find the location in cache.
-  //auto is_find = cache_.Get(l, value);
-  //if (is_find == kSucc) {
-  //  return kSucc;
-  //}
+  static thread_local char *buf = nullptr;
+  constexpr int kPageSize = 4096;
 
+  // !!! must align, do not use value->data() directly.
+  if (!buf) {
+    if (posix_memalign(reinterpret_cast<void**>(&buf), kPageSize, kPageSize)) {
+      DEBUG << "posix_memalign failed!\n";
+    }
+  }
 /*
-  int64_t want_pos = l.offset;
-  int fd = -1;
-
   spin_lock(fd_cache_lock_);
   auto iter = fd_cache_.find(l.file_no);
 
+  int fd = -1;
   // if not found. try to add it into cache.
   if (iter == fd_cache_.end()) {
     // need to free the lock when call system call.
@@ -201,75 +197,28 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
       return kIOError;
     }
     spin_lock(fd_cache_lock_);
-    fd_cache_.emplace(std::piecewise_construct,
-                      std::forward_as_tuple(l.file_no),
-                      std::forward_as_tuple(fd));
+    auto ret = fd_cache_.emplace(std::piecewise_construct,
+                                 std::forward_as_tuple(l.file_no),
+                                 std::forward_as_tuple(fd));
+    iter = ret.first;
+    DEBUG << "fd_cache_.size() = " << fd_cache_.size() << std::endl;
   }
+  fd = iter->second;
   spin_unlock(fd_cache_lock_);
 */
+  int fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY | O_DIRECT, 0644);
 
-/*
-  fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY | O_DIRECT, 0644);
-  if (fd < 0) {
-      DEBUG << " open " << FileName(dir_, l.file_no).c_str() << " failed" << std::endl;
-  }
+  value->clear();
   value->resize(l.len);
-  char* buf = const_cast<char*>(value->data());
-  DEBUG << "read " << FileName(dir_, l.file_no).c_str() << " : " << want_pos << std::endl;
-  read_page(fd, buf, want_pos);
+  read_page(fd, buf, l.offset);
   close(fd);
 
-  // if not find,  then put it into cache.
-  //cache_.Put(l, *value);
-
-  return kSucc;
-*/
-
-  // try to find the location in cache.
-  //auto is_find = cache_.Get(l, value);
-  //if (is_find == kSucc) {
-  //  return kSucc;
-  //}
-
-  int fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY, 0644);
-  if (fd < 0) {
-    DEBUG << " open " << FileName(dir_, l.file_no).c_str() << " failed" << std::endl;
-    return kIOError;
+  // manual memcpy
+  uint64_t *to = reinterpret_cast<uint64_t*>(const_cast<char*>(value->data()));
+  uint64_t *from = reinterpret_cast<uint64_t*>(buf);
+  for (int i = 0; i < 512; i++) {
+    *to++ = *from;
   }
-
-  // need to seek?
-  int64_t want_pos = l.offset;
-  lseek(fd, want_pos, SEEK_SET);
-
-  if (lseek(fd, 0, SEEK_CUR) != l.offset) {
-    DEBUG << "cur = " << lseek(fd, 0, SEEK_CUR) << "logic = " << l.offset << std::endl;
-    DEBUG << "the file offset is not right!" << std::endl;
-    return kIOError;
-  }
-
-  value->resize(l.len);
-  char* buf = const_cast<char*>(value->data());
-  char* pos = buf;
-  uint32_t value_len = l.len;
-
-  while (value_len > 0) {
-    ssize_t r = read(fd, pos, value_len);
-    if (r == 0) return kIOError; // JIYOU
-    if (r < 0) {
-      if (errno == EINTR) {
-        continue;  // Retry
-      }
-      close(fd);
-      DEBUG << " read(" << pos << ":" << value_len << "failed" << std::endl;
-      return kIOError;
-    }
-    pos += r;
-    value_len -= r;
-  }
-
-  close(fd);
-  // if not find,  then put it into cache.
-  //cache_.Put(l, *value);
 
   return kSucc;
 }

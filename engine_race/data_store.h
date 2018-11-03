@@ -70,17 +70,8 @@ class DataStore  {
   // 160K * 8K ~= 1.28G
   // LRUCache<Location, std::string> cache_;
 
-  // record the file_no -> fd
-/*
   spinlock fd_cache_lock_;
   std::unordered_map<int, int> fd_cache_;
-*/
-  struct file_info {
-    int fd;
-    uint32_t pos;
-    file_info(int f, int p): fd(f), pos(p) { }
-  };
-  std::unordered_map<int, file_info> fd_cache_;
 
   RetCode OpenCurFile();
 };

@@ -158,7 +158,7 @@ int aio_read_example() {
   // begin to prepare every write request.
   for (int i = 0; i < 1; i++) {
     ops[i] = (struct iocb*) malloc(sizeof(struct iocb));
-    io_prep_pread(ops[i], fd, buf, kPageSize, 0);
+    io_prep_pread(ops[i], fd, buf, kPageSize, 245760);
     std::cout << "align prep_pread = " << ops[i]->u.c.nbytes << std::endl;
     // TODO. may set some ops[i].data = some callback calss obj.
   }
@@ -197,6 +197,7 @@ int aio_read_example() {
   ops = nullptr;
   io_destroy(ctx);
   close(fd);
+  DEBUG << "buf[0] = " << buf[0] << std::endl;
   free(buf);
 }
 
