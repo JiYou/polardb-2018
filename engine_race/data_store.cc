@@ -159,21 +159,46 @@ static void read_page(int fd, char *buf, int file_offset) {
     constexpr int kSingleRequest = 1;
     constexpr int kPageSize = 4096;
 
-    // prepare the io context.
-    io_context_t ctx;
-    memset(&ctx, 0, sizeof(ctx));
-    if (io_setup(1, &ctx) < 0) {
-      DEBUG << "Error in io_setup" << std::endl;
-    }
+    struct aio_env {
+      aio_env() {
+        // prepare the io context.
+        memset(&ctx, 0, sizeof(ctx));
+        if (io_setup(1, &ctx) < 0) {
+          DEBUG << "Error in io_setup" << std::endl;
+        }
 
-    struct iocb iocb;
-    struct iocb* iocbs = &iocb;
-    io_prep_pread(&iocb, fd, buf, kPageSize, file_offset);
-    // TODO. may set some ops[i].data = some callback calss obj.
+        timeout.tv_sec = 0;
+        timeout.tv_nsec = 0;
+
+        iocbs = &iocb;
+
+        memset(&iocb, 0, sizeof(iocb));
+        // iocb->aio_fildes = fd;
+        iocb.aio_lio_opcode = IO_CMD_PREAD;
+        iocb.aio_reqprio = 0;
+        // iocb->u.c.buf = buf;
+        iocb.u.c.nbytes = kPageSize;
+        // iocb->u.c.offset = offset;
+      }
+
+      ~aio_env() {
+        io_destroy(ctx);
+      }
+
+      io_context_t ctx;
+      struct iocb iocb;
+      struct iocb* iocbs;
+      struct io_event events;
+      struct timespec timeout;
+    };
+
+    static thread_local aio_env ae;
+    ae.iocb.aio_fildes = fd;
+    ae.iocb.u.c.buf = buf;
+    ae.iocb.u.c.offset = file_offset;
 
     int ret = 0;
-    if ((ret = io_submit(ctx, kSingleRequest, &iocbs)) != kSingleRequest) {
-      io_destroy(ctx);
+    if ((ret = io_submit(ae.ctx, kSingleRequest, &(ae.iocbs))) != kSingleRequest) {
       DEBUG << "io_submit meet error, ret = " << ret << std::endl;;
       printf("io_submit error\n");
       return;
@@ -181,21 +206,14 @@ static void read_page(int fd, char *buf, int file_offset) {
 
     // after submit, need to wait all read over.
     int write_over_cnt = 0;
-    struct io_event events;
-
-    struct timespec timeout;
-    timeout.tv_sec = 0;
-    // one IO would take 1700ns
-    timeout.tv_nsec = 1700;
 
     while (write_over_cnt != kSingleRequest) {
       constexpr int min_number = 1;
       constexpr int max_number = kSingleRequest;
-      int num_events = io_getevents(ctx, min_number, max_number, &events, &timeout);
+      int num_events = io_getevents(ae.ctx, min_number, max_number, &(ae.events), &(ae.timeout));
       // need to call for (i = 0; i < num_events; i++) events[i].call_back();
       write_over_cnt += num_events;
     }
-    io_destroy(ctx);
 }
 
 RetCode DataStore::Read(const Location& l, std::string* value) {
