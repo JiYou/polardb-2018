@@ -130,8 +130,8 @@ void EngineRace::ReadEntry() {
     // TODO: add interface in data for batch update.
     to_read.resize(to_index);
     file_pos.resize(to_index);
-    // store_.BatchRead(to_read, file_pos);
-
+    // call the release x->lock in AIO event.
+    store_.BatchRead(to_read, file_pos);
   }
 }
 #endif

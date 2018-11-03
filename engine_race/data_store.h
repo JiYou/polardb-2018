@@ -49,6 +49,7 @@ class DataStore  {
   ~DataStore();
 
   RetCode Init();
+  RetCode BatchRead(std::vector<read_item*> &to_read, std::vector<Location> &l);
   RetCode Read(const Location& l, std::string* value);
   RetCode Append(const std::string& value, Location* location);
   RetCode Sync();

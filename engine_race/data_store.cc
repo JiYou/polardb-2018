@@ -194,6 +194,11 @@ static void read_page(int fd, char *buf, int file_offset) {
     io_destroy(ctx);
 }
 
+RetCode DataStore::BatchRead(std::vector<read_item*> &to_read, std::vector<Location> &file_pos) {
+  // set io_ctx
+  return kSucc;
+}
+
 RetCode DataStore::Read(const Location& l, std::string* value) {
   static thread_local char *buf = nullptr;
 
