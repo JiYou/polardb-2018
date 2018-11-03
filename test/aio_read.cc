@@ -209,7 +209,9 @@ int aio_read_example() {
 }
 
 int main(void) {
-  aio_write_example();
-  aio_read_example();
+  //aio_write_example();
+  for (int un = 0; un < 1000; un++) {
+    aio_read_example();
+  }
   return 0;
 }

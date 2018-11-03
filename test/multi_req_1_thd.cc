@@ -20,6 +20,11 @@
 #define LOG(x) std::cout
 #define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"()"<<"msg="<<strerror(errno)
 
+// 1000 request at a time.
+// 1003.40iops 489.84MB
+// offset = i * kPageSize
+// [0 ~ 1000] * 4KB ~= 4MB
+// actually read 400K once a time.
 constexpr int kMaxAIOEvents = 64;
 constexpr int kMaxReadPosition = 64;
 const char *file_name = "DATA_0";
@@ -34,14 +39,7 @@ constexpr int kPageSize = 4096;
  * - submit the 1000 io request.
  * - wait the write over.
  */
-int aio_read_example() {
-  int fd = -1;
-
-  fd = open(file_name, O_RDONLY | O_DIRECT, 0644);
-  if (fd < 0) {
-    DEBUG << "Error opening file" << std::endl;
-  }
-
+int aio_read_example(io_context_t &ctx, int &fd) {
   // alloc the memory
   char *pages[kMaxFileSize];
   for (int i = 0; i < kMaxFileSize; i++) {
@@ -54,19 +52,21 @@ int aio_read_example() {
     pages[i] = buf;
   }
 
-  // prepare the io context.
-  io_context_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-  LOG(INFO) << "Setting up the io context" << std::endl;
-  if (io_setup(kMaxFileSize, &ctx) < 0) {
-    DEBUG << "Error in io_setup" << std::endl;
-  }
 
   struct iocb **ops = (struct iocb**) malloc(sizeof(struct iocb*) * kMaxFileSize);
   // begin to prepare every write request.
   for (int i = 0; i < kMaxFileSize; i++) {
     ops[i] = (struct iocb*) malloc(sizeof(struct iocb));
+    io_prep_pread(ops[i], fd, pages[i], kPageSize, i * kPageSize);
     // TODO. may set some ops[i].data = some callback calss obj.
+  }
+
+  int ret = 0;
+  if ((ret = io_submit(ctx, kMaxFileSize, ops)) != kMaxFileSize) {
+    io_destroy(ctx);
+    DEBUG << "io_submit meet error, ret = " << ret << std::endl;;
+    printf("io_submit error\n");
+    return -1;
   }
 
   // after submit, need to wait all read over.
@@ -78,42 +78,21 @@ int aio_read_example() {
   timeout.tv_sec = 0;
   timeout.tv_nsec = 0;
 
-  for (int run = 0; run < 4; run++) {
-    // begin to prepare every write request.
-    for (int i = 0; i < kMaxFileSize; i++) {
-      io_prep_pread(ops[i], fd, pages[i], kPageSize, i * kPageSize);
-      // TODO. may set some ops[i].data = some callback calss obj.
-    }
-
-    int ret = 0;
-    if ((ret = io_submit(ctx, kMaxFileSize, ops)) != kMaxFileSize) {
-      io_destroy(ctx);
-      DEBUG << "io_submit meet error, ret = " << ret << std::endl;;
-      printf("io_submit error\n");
-      return -1;
-    } else {
-      DEBUG << " io_submit: success" << run << std::endl;
-    }
-
-    while (write_over_cnt != kMaxFileSize) {
-      constexpr int min_number = 1;
-      constexpr int max_number = kMaxFileSize;
-      int num_events = io_getevents(ctx, min_number, max_number, events, &timeout);
-      // need to call for (i = 0; i < num_events; i++) events[i].call_back();
-      write_over_cnt += num_events;
-    }
+  while (write_over_cnt != kMaxFileSize) {
+    constexpr int min_number = 1;
+    constexpr int max_number = kMaxFileSize;
+    int num_events = io_getevents(ctx, min_number, max_number, events, &timeout);
+    // need to call for (i = 0; i < num_events; i++) events[i].call_back();
+    write_over_cnt += num_events;
   }
-
-
   free(events);
+
   // clean resource
   for (int i = 0; i < kMaxFileSize; i++) {
     free(ops[i]);
   }
   free(ops);
   ops = nullptr;
-  io_destroy(ctx);
-  close(fd);
   for (int i = 0; i < kMaxFileSize; i++) {
     char *buf = pages[i];
     free(buf);
@@ -122,6 +101,29 @@ int aio_read_example() {
 }
 
 int main(void) {
-  aio_read_example();
+
+  // prepare the io context.
+  io_context_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  LOG(INFO) << "Setting up the io context" << std::endl;
+  if (io_setup(kMaxFileSize, &ctx) < 0) {
+    DEBUG << "Error in io_setup" << std::endl;
+    return 0;
+  }
+
+  int fd = -1;
+  fd = open(file_name, O_RDONLY | O_DIRECT, 0644);
+  if (fd < 0) {
+    DEBUG << "Error opening file" << std::endl;
+    return 0;
+  }
+
+
+  for (int i = 0; i < 10000; i++) {
+    aio_read_example(ctx, fd);
+  }
+
+  close(fd);
+  io_destroy(ctx);
   return 0;
 }
