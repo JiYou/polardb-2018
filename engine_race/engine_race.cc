@@ -93,6 +93,7 @@ void EngineRace::WriteEntry() {
   }
 }
 
+#ifdef READ_QUEUE
 void EngineRace::ReadEntry() {
   std::vector<read_item*> vs(64, nullptr);
   DEBUG << "db::ReadEntry()" << std::endl;
@@ -100,13 +101,16 @@ void EngineRace::ReadEntry() {
     read_queue_.Pop(&vs);
   }
 }
+#endif
 
 void EngineRace::start() {
   std::thread write_thread_(&EngineRace::WriteEntry, this);
   write_thread_.detach();
 
+#ifdef READ_QUEUE
   std::thread read_thread_(&EngineRace::ReadEntry, this);
   read_thread_.detach();
+#endif
 }
 
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {

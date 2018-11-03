@@ -7,6 +7,10 @@
 #include <vector>
 #include<iostream>
 
+// Is use read queue?
+#define READ_QUEUE 0
+
+
 #define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"()"<<"msg="<<strerror(errno)
 
 namespace polar_race {

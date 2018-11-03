@@ -24,7 +24,6 @@
 #include <queue>
 #include <map>
 
-
 namespace polar_race {
 
 struct write_item {
@@ -121,6 +120,7 @@ class EngineRace : public Engine  {
  public:
   static RetCode Open(const std::string& name, Engine** eptr);
 
+#ifdef READ_QUEUE
   explicit EngineRace(const std::string& dir,
                       size_t write_queue_size=kMaxQueueSize,
                       size_t read_queue_size=kMaxQueueSize)
@@ -130,6 +130,14 @@ class EngineRace : public Engine  {
     write_queue_(write_queue_size),
     read_queue_(read_queue_size) {
   }
+#else
+  explicit EngineRace(const std::string& dir)
+    : db_lock_(NULL),
+    plate_(dir),
+    store_(dir),
+    write_queue_(write_queue_size) {
+  }
+#endif
 
   ~EngineRace();
 
@@ -144,8 +152,13 @@ class EngineRace : public Engine  {
       Visitor &visitor) override;
 
  private:
+
   void WriteEntry();
+
+#ifdef READ_QUEUE
   void ReadEntry();
+#endif
+
   void start();
 
  private:
@@ -155,7 +168,10 @@ class EngineRace : public Engine  {
 
   std::atomic<bool> stop_{false};
   Queue<write_item> write_queue_;
+
+#ifdef READ_QUEUE
   Queue<read_item> read_queue_;
+#endif
 };
 
 }  // namespace polar_race
