@@ -33,7 +33,7 @@ struct aio_env {
   aio_env() {
     // prepare the io context.
     memset(&ctx, 0, sizeof(ctx));
-    if (io_setup(kSingleRequest, &ctx) < 0) {
+    if (io_setup(kMaxIOEvent, &ctx) < 0) {
       DEBUG << "Error in io_setup" << std::endl;
     }
 
@@ -41,7 +41,7 @@ struct aio_env {
     timeout.tv_nsec = 0;
 
     memset(&iocb, 0, sizeof(iocb));
-    for (int i = 0; i < kSingleRequest; i++) {
+    for (int i = 0; i < kMaxIOEvent; i++) {
       iocbs[i] = iocb + i;
       iocb[i].aio_lio_opcode = IO_CMD_PREAD;
       iocb[i].aio_reqprio = 0;
@@ -66,7 +66,7 @@ struct aio_env {
   }
 
   RetCode Submit() {
-    if ((io_submit(ctx, index, iocbs)) != kSingleRequest) {
+    if ((io_submit(ctx, index, iocbs)) != index) {
       DEBUG << "io_submit meet error, " << std::endl;;
       printf("io_submit error\n");
       return kIOError;
@@ -88,9 +88,9 @@ struct aio_env {
 
   int index = 0;
   io_context_t ctx;
-  struct iocb iocb[kSingleRequest];
-  struct iocb* iocbs[kSingleRequest];
-  struct io_event events[kSingleRequest];
+  struct iocb iocb[kMaxIOEvent];
+  struct iocb* iocbs[kMaxIOEvent];
+  struct io_event events[kMaxIOEvent];
   struct timespec timeout;
 };
 
