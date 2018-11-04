@@ -223,14 +223,15 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
   // if not hit previous cache.
   // find or open the related fd.
   int fd = -1;
-  bool to_close = false;
   if (l.file_no >= fd_cache_num_ || !fd_cache_[l.file_no]) {
-    fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY | O_DIRECT, 0644);
-    if (fd < 0) {
-      DEBUG << " open " << FileName(dir_, l.file_no).c_str() << " failed" << std::endl;
-      return kIOError;
+    auto ret = find_shared_cache(l.file_no, &fd);
+    if (ret == kNotFound) {
+      fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY | O_DIRECT, 0644);
+      if (fd < 0) {
+        DEBUG << " open " << FileName(dir_, l.file_no).c_str() << " failed" << std::endl;
+        return kIOError;
+      }
     }
-    to_close = true;
   } else {
     fd = fd_cache_[l.file_no];
   }
@@ -254,21 +255,13 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
   // manual memcpy
   uint64_t *to = reinterpret_cast<uint64_t*>(const_cast<char*>(value->data()));
   uint64_t *from = reinterpret_cast<uint64_t*>(ae.buf);
-
+  update_shared_cache(l.file_no, fd);
   // Task end===========
 
   // after submit, need to wait all read over.
-  int write_over_cnt = 0;
-  while (write_over_cnt != kSingleRequest) {
-    constexpr int min_number = 1;
-    constexpr int max_number = kSingleRequest;
-    int num_events = io_getevents(ae.ctx, min_number, max_number, &(ae.events), &(ae.timeout));
-    // need to call for (i = 0; i < num_events; i++) events[i].call_back();
-    write_over_cnt += num_events;
-  }
-
-  if (to_close) {
-    close(fd);
+  while (io_getevents(ae.ctx, kSingleRequest, kSingleRequest,
+                      &(ae.events), &(ae.timeout)) != kSingleRequest) {
+    /**/
   }
 
   for (int i = 0; i < 512; i++) {

@@ -78,6 +78,24 @@ class DataStore  {
   int fd_cache_num_ = 0;
   int *fd_cache_ = nullptr;
 
+ private:
+  RetCode find_shared_cache(int file_no, int *fd) {
+    unique_spin_lock l(shared_fd_lock_);
+    auto pos = shared_fd_.find(file_no);
+    if (pos == shared_fd_.end()) {
+      return kNotFound;
+    }
+    *fd = pos->second;
+    return kSucc;
+  }
+
+  RetCode update_shared_cache(int file_no, int fd) {
+     unique_spin_lock l(shared_fd_lock_);
+     shared_fd_.emplace(std::piecewise_construct,
+                   std::forward_as_tuple(file_no),
+                              std::forward_as_tuple(fd));
+    return kSucc;
+  }
   spinlock shared_fd_lock_;
   std::unordered_map<int, int> shared_fd_;
 

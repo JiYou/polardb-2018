@@ -26,6 +26,17 @@ class spinlock final {
   }
 };
 
+class unique_spin_lock final {
+  spinlock &l;
+ public:
+  unique_spin_lock(spinlock &lo) : l(lo) {
+    l.lock();
+  }
+  ~unique_spin_lock() {
+    l.unlock();
+  }
+};
+
 // Free functions:
 inline void spin_lock(std::atomic_flag& lock) {
  while(lock.test_and_set(std::memory_order_acquire))
