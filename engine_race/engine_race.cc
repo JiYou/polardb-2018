@@ -60,9 +60,9 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   auto data_end_time = std::chrono::system_clock::now();
   diff = std::chrono::duration_cast<std::chrono::nanoseconds>(data_end_time - hash_start_time);
   if (diff.count() > kNanoToMS) {
-    std::cout << "Hash load time = " << diff.count() / kNanoToMS << " (ms)" << std::endl;
+    std::cout << "Data load time = " << diff.count() / kNanoToMS << " (ms)" << std::endl;
   } else {  
-    std::cout << "Hash load time = " << diff.count() << " (ns)" << std::endl;
+    std::cout << "Data load time = " << diff.count() << " (ns)" << std::endl;
   }
 #endif
 
