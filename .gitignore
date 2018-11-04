@@ -36,3 +36,9 @@ test/write
 test/write.log.q
 test/write.log.seq
 test/write.old.log.2
+test/mock_fio
+test/multi_req_1_thd
+test/multi_req_1_thd_1000
+test/multi_req_1_thd_64
+test/no_cmp_read
+test/test_chrono
