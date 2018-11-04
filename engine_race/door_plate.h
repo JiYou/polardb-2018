@@ -13,6 +13,7 @@
 #include <map>
 #include <string>
 #include <unordered_map>
+#include <bitset>
 
 namespace polar_race {
 
@@ -52,6 +53,16 @@ class HashTreeTable {
   RetCode Get(const std::string &key, Location *l);
   RetCode Set(const std::string &key, const Location &l);
 
+  // NOTE: no lock here. Do not call it anywhere.
+  // after load all the entries from disk,
+  // for speed up the lookup, need to sort it.
+  // after some set operations->append to the
+  // hash shard vector.
+  // Such as: bucket[i] has do push_back()
+  // then has_sort_[i] must be false;
+  // then can not use binary_search to find the item.
+  void Sort();
+
  public:
   HashTreeTable(): hash_lock_(kMaxBucketSize) {
     hash_.resize(kMaxBucketSize);
@@ -75,13 +86,26 @@ class HashTreeTable {
     uint32_t pos;
     kv_info(uint64_t k, uint32_t v): key(k), pos(v) { }
     kv_info(): key(0), pos(0) { }
+    bool operator < (const uint64_t k) const {
+      return key < k;
+    }
+    bool operator < (const kv_info &x) const {
+      return key < x.key;
+    }
+    bool operator == (const kv_info &k) const {
+      return key == k.key && pos == k.pos;
+    }
+    bool operator != (const kv_info &k) {
+      return key != k.key || pos != k.pos;
+    }
   };
   #pragma pack(pop)
   std::vector<std::vector<kv_info>> hash_;
   std::vector<spinlock> hash_lock_;
+  std::bitset<kMaxBucketSize> has_sort_;
  private:
   uint32_t compute_pos(uint64_t key);
-  RetCode find(std::vector<kv_info> &vs, uint64_t key, kv_info **ptr);
+  RetCode find(std::vector<kv_info> &vs, bool sorted, uint64_t key, kv_info **ptr);
 };
 
 // Hash index for key
