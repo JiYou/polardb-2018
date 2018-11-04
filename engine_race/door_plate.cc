@@ -172,6 +172,9 @@ void HashTreeTable::Sort() {
 
   auto set_all_sorted = [this]() {
       has_sort_.set();
+      if (!has_sort_.test(0)) {
+        DEBUG << "ERROR: sorted set error." << std::endl;
+      }
   };
   std::thread set_sort_bit(set_all_sorted);
 
