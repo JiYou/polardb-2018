@@ -25,10 +25,17 @@
 // Is use read queue?
 #define READ_QUEUE 0
 
+// perf counter.
+#define PERF_COUNT 1
+
 
 #define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"()"<<"msg="<<strerror(errno)
 
 namespace polar_race {
+
+#ifdef PERF_COUNT
+exontexpr uint64_t kNanoToMS = 1000000;
+#endif
 
 constexpr uint32_t kMaxKeyLen = 8;
 constexpr uint32_t kMaxValueLen = 4096;

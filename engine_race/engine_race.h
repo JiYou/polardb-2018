@@ -134,6 +134,22 @@ class EngineRace : public Engine  {
 #ifdef READ_QUEUE
   Queue<read_item> read_queue_;
 #endif
+
+#ifdef PERF_COUNT
+
+  // perfcounters for the read items.
+  //
+  // How many interval of items to print stat time.
+  std::atomic<uint64_t> print_interval_{10000};
+  std::atomic<uint64_t> item_cnt_{0};
+  // all time is in nonoseconds.
+  // record the hash lookup time.
+  std::atomic<uint64_t> hash_time_cnt_{0};
+  // record the total disk_io read time.
+  std::atomic<uint64_t> io_time_read_cnt_{0};
+  // record the total disk_io write time.
+  std::atomic<uint64_t> io_time_write_cnt_{0};
+#endif
 };
 
 }  // namespace polar_race
