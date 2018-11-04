@@ -63,6 +63,9 @@ class HashTreeTable {
   // then can not use binary_search to find the item.
   void Sort();
 
+  // print Hash Mean StdDev size of hash shard.
+  void PrintMeanStdDev();
+
  public:
   HashTreeTable(): hash_lock_(kMaxBucketSize) {
     hash_.resize(kMaxBucketSize);

@@ -9,7 +9,23 @@
 #include <sys/stat.h>
 #include <sys/file.h>
 
+#include <vector>
+#include <algorithm>
+#include <math.h>
+
 namespace polar_race {
+
+void ComputeMeanSteDev(const std::vector<size_t> &resultSet, double *mean_, double *std_) {
+  double sum = std::accumulate(std::begin(resultSet), std::end(resultSet), 0.0);
+  double mean =  sum / resultSet.size();
+  double accum  = 0.0;
+  std::for_each (std::begin(resultSet), std::end(resultSet), [&](const double d) {
+    accum  += (d-mean)*(d-mean);
+  });
+  double stdev = sqrt(accum/(resultSet.size()-1));
+  *mean_ = mean;
+  *std_ = stdev;
+}
 
 static const int kA = 54059;  // a prime
 static const int kB = 76963;  // another prime

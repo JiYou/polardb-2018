@@ -165,6 +165,16 @@ void HashTreeTable::Sort() {
   }
 }
 
+void HashTreeTable::PrintMeanStdDev() {
+  std::vector<size_t> vs;
+  for (auto &shard: hash_) {
+    vs.push_back(shard.size());
+  }
+  double mean = 0, stdev = 0;
+  ComputeMeanSteDev(vs, &mean, &stdev);
+  std::cout << "HashHard Stat: mean = " << mean
+            << " , " << "stdev = " << stdev << std::endl;
+}
 
 // 生成特定的文件名
 static std::string FileName(const std::string &dir, uint32_t fileno) {
@@ -242,6 +252,9 @@ RetCode DoorPlate::Init() {
   // sort the hash table.
   // after all the entries pushed into hashtree.
   hash_table_.Sort();
+  std::cout << "============================" << std::endl;
+  hash_table_.PrintMeanStdDev();
+  std::cout << "============================" << std::endl;
 
   // Open file
   return OpenCurFile();

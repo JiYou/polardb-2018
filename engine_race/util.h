@@ -80,6 +80,7 @@ struct read_item {
   }
 };
 
+void ComputeMeanSteDev(const std::vector<size_t> &vs, double *mean, double *std);
 
 // Hash
 uint32_t StrHash(const char* s, int size);
