@@ -29,13 +29,9 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   *eptr = NULL;
   EngineRace *engine_race = new EngineRace(name);
 
-#ifdef PERF_COUNT
   auto hash_start_time = std::chrono::system_clock::now();
-#endif
-
   RetCode ret = engine_race->plate_.Init();
 
-#ifdef PERF_COUNT
   auto hash_end_time = std::chrono::system_clock::now();
   auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(hash_end_time - hash_start_time);
   if (diff.count() > kNanoToMS) {
@@ -43,7 +39,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   } else {  
     std::cout << "Hash load time = " << diff.count() << " (ns)" << std::endl;
   }
-#endif
 
   if (ret != kSucc) {
     delete engine_race;
@@ -56,7 +51,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
     return ret;
   }
 
-#ifdef PERF_COUNT
   auto data_end_time = std::chrono::system_clock::now();
   diff = std::chrono::duration_cast<std::chrono::nanoseconds>(data_end_time - hash_start_time);
   if (diff.count() > kNanoToMS) {
@@ -64,7 +58,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   } else {  
     std::cout << "Data load time = " << diff.count() << " (ns)" << std::endl;
   }
-#endif
 
   if (0 != LockFile(name + "/" + kLockFile, &(engine_race->db_lock_))) {
     delete engine_race;
