@@ -41,14 +41,10 @@ constexpr int kPageSize = 4096;
  */
 
 char *pages[kMaxFileSize];
-int aio_read_example(io_context_t &ctx, int &fd) {
-
-  struct iocb **ops = (struct iocb**) malloc(sizeof(struct iocb*) * kMaxFileSize);
+int aio_read_example(io_context_t &ctx, int &fd, struct iocb** &ops, struct io_event* &events) {
   // begin to prepare every write request.
   for (int i = 0; i < kMaxFileSize; i++) {
-    ops[i] = (struct iocb*) malloc(sizeof(struct iocb));
-
-    auto idx = (static_cast<uint32_t>(random()) % 25500);
+    auto idx = (static_cast<uint32_t>(random()) % 179100);
     io_prep_pread(ops[i], fd, pages[i], kPageSize, idx * kPageSize);
     // TODO. may set some ops[i].data = some callback calss obj.
   }
@@ -63,8 +59,6 @@ int aio_read_example(io_context_t &ctx, int &fd) {
 
   // after submit, need to wait all read over.
   int write_over_cnt = 0;
-  struct io_event *events = (struct io_event*)
-        malloc(sizeof(struct io_event) * kMaxFileSize);
 
   struct timespec timeout;
   timeout.tv_sec = 0;
@@ -77,14 +71,6 @@ int aio_read_example(io_context_t &ctx, int &fd) {
     // need to call for (i = 0; i < num_events; i++) events[i].call_back();
     write_over_cnt += num_events;
   }
-  free(events);
-
-  // clean resource
-  for (int i = 0; i < kMaxFileSize; i++) {
-    free(ops[i]);
-  }
-  free(ops);
-  ops = nullptr;
 }
 
 int main(void) {
@@ -116,8 +102,18 @@ int main(void) {
     pages[i] = buf;
   }
 
+  struct iocb **ops = (struct iocb**) malloc(sizeof(struct iocb*) * kMaxFileSize);
+  // begin to prepare every write request.
+  for (int i = 0; i < kMaxFileSize; i++) {
+    ops[i] = (struct iocb*) malloc(sizeof(struct iocb));
+    // TODO. may set some ops[i].data = some callback calss obj.
+  }
+
+  struct io_event *events = (struct io_event*)
+        malloc(sizeof(struct io_event) * kMaxFileSize);
+
   for (int i = 0; i < 100000; i++) {
-    aio_read_example(ctx, fd);
+    aio_read_example(ctx, fd, ops, events);
   }
 
   for (int i = 0; i < kMaxFileSize; i++) {
@@ -125,7 +121,11 @@ int main(void) {
     free(buf);
     pages[i] = nullptr;
   }
-
+  for (int i = 0; i < kMaxFileSize; i++) {
+    free(ops[i]);
+  }
+  free(ops);
+  free(events);
   close(fd);
   io_destroy(ctx);
   return 0;
