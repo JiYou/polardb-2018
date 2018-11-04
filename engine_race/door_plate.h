@@ -31,23 +31,6 @@ struct Item {
   uint8_t in_use;        // 这个item是否被使用
 };
 
-class IndexHash {
- public:
-  RetCode Get(const std::string &key, Location *l);
-  RetCode Set(const std::string &key, const Location &l);
-  IndexHash() { }
-  ~IndexHash() { }
-
- public:
-  IndexHash(const IndexHash &) = delete;
-  IndexHash(const IndexHash &&) = delete;
-  IndexHash &operator=(const IndexHash&) = delete;
-  IndexHash &operator=(const IndexHash&&) = delete;
- private:
-  std::unordered_map<int64_t, uint32_t> hash_;
-};
-
-
 class HashTreeTable {
  public:
   // Just these 2 function with lock
@@ -107,6 +90,8 @@ class HashTreeTable {
   std::vector<std::vector<kv_info>> hash_;
   std::vector<spinlock> hash_lock_;
   std::bitset<kMaxBucketSize> has_sort_;
+  // the starting write pos of 4K data.
+  uint64_t next_write_pos_ = 0;
  private:
   uint32_t compute_pos(uint64_t key);
   RetCode find(std::vector<kv_info> &vs, bool sorted, uint64_t key, kv_info **ptr);

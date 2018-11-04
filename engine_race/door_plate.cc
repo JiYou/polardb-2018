@@ -26,44 +26,6 @@ static const std::string kMetaDirName = "index";
 static const char kMetaFileNamePrefix[] = "META_";
 static const int kSingleFileSize = 1024 * 1024 * 100;  // 100MB
 
-// IndexHash
-RetCode IndexHash::Get(const std::string &key, Location *l) {
-  const int64_t *k = reinterpret_cast<const int64_t*>(key.data());
-  auto iter = hash_.find(*k);
-  if (iter == hash_.end()) {
-    return kNotFound;
-  }
-
-  uint32_t pos = iter->second;
-  // 16bit|16bit = 32bit;
-  // the first 16bit is stands for file_no
-  // the second 16bit stands for offset /4K
-  uint16_t file_no = pos >> kSplitPos;
-  uint32_t offset = (pos & 0xffff) << kValueLengthBits;
-
-  l->file_no = file_no;
-  l->offset = offset;
-  l->len = 1 << kValueLengthBits;
-  return kSucc;
-}
-
-RetCode IndexHash::Set(const std::string &key, const Location &l) {
-  const int64_t *k = reinterpret_cast<const int64_t*>(key.data());
-
-  uint32_t file_no = l.file_no;
-  uint32_t offset = l.offset >> kValueLengthBits;
-  uint32_t pos = (file_no << kSplitPos) | offset;
-
-  auto ret = hash_.emplace(std::piecewise_construct,
-                               std::forward_as_tuple(*k),
-                               std::forward_as_tuple(pos));
-
-  if (!ret.second) {
-    ret.first->second = pos;
-  }
-  return kSucc;
-}
-
 // Hash tree part
 
 uint32_t HashTreeTable::compute_pos(uint64_t x) {
