@@ -13,6 +13,7 @@
 #include <map>
 #include <numeric>
 #include <chrono>
+#include <atomic>
 
 namespace polar_race {
 
@@ -28,40 +29,54 @@ Engine::~Engine() {
 RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   *eptr = NULL;
   EngineRace *engine_race = new EngineRace(name);
+  std::atomic<bool> meet_error{false};
 
-  auto hash_start_time = std::chrono::system_clock::now();
-  RetCode ret = engine_race->plate_.Init();
+  // thread 1 to start to load the hash table.
+  auto load_hash = [&engine_race, &meet_error]() {
+    auto hash_start_time = std::chrono::system_clock::now();
+    RetCode ret = engine_race->plate_.Init(); // Init Hash Store
+    auto hash_end_time = std::chrono::system_clock::now();
+    auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(hash_end_time - hash_start_time);
+    std::cout << "Hash load time = " << diff.count()  / kNanoToMS<< " (ms)" << std::endl;
 
-  auto hash_end_time = std::chrono::system_clock::now();
-  auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(hash_end_time - hash_start_time);
-  if (diff.count() > kNanoToMS) {
-    std::cout << "Hash load time = " << diff.count() / kNanoToMS << " (ms)" << std::endl;
-  } else {  
-    std::cout << "Hash load time = " << diff.count() << " (ns)" << std::endl;
-  }
+    if (ret != kSucc) {
+      DEBUG << "load_hash failed" << std::endl;
+      meet_error = true;
+    }
+  };
 
-  if (ret != kSucc) {
-    delete engine_race;
-    return ret;
-  }
-
-  ret = engine_race->store_.Init();
-  if (ret != kSucc) {
-    delete engine_race;
-    return ret;
-  }
-
-  auto data_end_time = std::chrono::system_clock::now();
-  diff = std::chrono::duration_cast<std::chrono::nanoseconds>(data_end_time - hash_start_time);
-  if (diff.count() > kNanoToMS) {
+  auto load_store = [&engine_race, &meet_error]() {
+    auto data_start_time = std::chrono::system_clock::now();
+    auto ret = engine_race->store_.Init(); // Init Data Store
+    auto data_end_time = std::chrono::system_clock::now();
+    auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(data_end_time - data_start_time);
     std::cout << "Data load time = " << diff.count() / kNanoToMS << " (ms)" << std::endl;
-  } else {  
-    std::cout << "Data load time = " << diff.count() << " (ns)" << std::endl;
+
+    if (ret != kSucc) {
+      DEBUG << "load_store failed" << std::endl;
+      meet_error = true;
+    }
+  };
+
+  auto creat_lock_file = [&engine_race, &meet_error, &name]() {
+    if (0 != LockFile(name + "/" + kLockFile, &(engine_race->db_lock_))) {
+      meet_error = true;
+      DEBUG << "Generate LOCK file failed" << std::endl;
+      return kIOError;
+    }
+  };
+
+  // start to create thread to init the system.
+  std::vector<std::thread> thread_list;
+  thread_list.emplace_back(std::thread(load_hash));
+  thread_list.emplace_back(std::thread(load_store));
+  thread_list.emplace_back(std::thread(creat_lock_file));
+  for (auto &x: thread_list) {
+    x.join();
   }
 
-  if (0 != LockFile(name + "/" + kLockFile, &(engine_race->db_lock_))) {
+  if (meet_error) {
     delete engine_race;
-    DEBUG << "Generate LOCK file failed" << std::endl;
     return kIOError;
   }
 
