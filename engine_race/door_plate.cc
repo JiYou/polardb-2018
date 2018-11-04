@@ -82,11 +82,25 @@ void HashTreeTable::UnlockHashShard(uint32_t index) {
   spin_unlock(hash_lock_[index]);
 }
 
-RetCode HashTreeTable::find(std::vector<kv_info> &vs, uint64_t key, kv_info **ptr) {
-  for (auto &x: vs) {
-    if (x.key == key) {
-      *ptr = &x;
+RetCode HashTreeTable::find(std::vector<kv_info> &vs, bool sorted, uint64_t key, kv_info **ptr) {
+  // to check is sorted?
+  if (sorted) {
+    // if sort, then use binary_search;
+    auto pos = std::lower_bound(vs.begin(), vs.end(), key, [](const kv_info &a, uint64_t b) {
+      return a < b;
+    });
+    // has find.
+    if (pos != vs.end() && !(key < pos->key)) {
+      *ptr = &(*pos);
       return kSucc;
+    }
+  } else {
+    // if not sort, find one by one.
+    for (auto &x: vs) {
+      if (x.key == key) {
+        *ptr = &x;
+        return kSucc;
+      }
     }
   }
   return kNotFound;
@@ -101,7 +115,7 @@ RetCode HashTreeTable::Get(const std::string &key, Location *l) {
   auto &vs = hash_[array_pos];
   uint32_t pos = 0;
   kv_info *ptr = nullptr;
-  auto ret = find(vs, *k, &ptr);
+  auto ret = find(vs, has_sort_.test(array_pos), *k, &ptr);
 
   if (ret == kNotFound) {
     UnlockHashShard(array_pos);
@@ -139,15 +153,25 @@ RetCode HashTreeTable::Set(const std::string &key, const Location &l) {
   auto &vs = hash_[array_pos];
 
   kv_info *ptr;
-  auto ret = find(vs, *k, &ptr);
+  auto ret = find(vs, has_sort_.test(array_pos), *k, &ptr);
 
   if (ret == kNotFound) {
     vs.emplace_back(*k, pos);
+    // broken the sorted list.
+    has_sort_.reset(array_pos);
   } else {
     ptr->pos = pos;
   }
   UnlockHashShard(array_pos);
   return kSucc;
+}
+
+void HashTreeTable::Sort() {
+  for (size_t i = 0; i < kMaxBucketSize; i++) {
+    auto &vs = hash_[i];
+    std::sort(vs.begin(), vs.end());
+    has_sort_.set(i);
+  }
 }
 
 
@@ -223,6 +247,10 @@ RetCode DoorPlate::Init() {
       offset_ = len;
     }
   }
+
+  // sort the hash table.
+  // after all the entries pushed into hashtree.
+  hash_table_.Sort();
 
   // Open file
   return OpenCurFile();
