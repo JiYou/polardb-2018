@@ -62,7 +62,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
     if (0 != LockFile(name + "/" + kLockFile, &(engine_race->db_lock_))) {
       meet_error = true;
       DEBUG << "Generate LOCK file failed" << std::endl;
-      return kIOError;
     }
   };
 
