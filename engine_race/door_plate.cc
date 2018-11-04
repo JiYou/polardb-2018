@@ -160,11 +160,33 @@ RetCode HashTreeTable::Set(const std::string &key, const Location &l) {
 }
 
 void HashTreeTable::Sort() {
-  for (size_t i = 0; i < kMaxBucketSize; i++) {
-    auto &vs = hash_[i];
-    std::sort(vs.begin(), vs.end());
-    has_sort_.set(i);
+  // there are 64 thread.
+  // split all the range to 64 threads.
+  // every thread would contains 104354.
+  auto sort_range = [this](const size_t begin, const size_t end) {
+    for (size_t i = begin; i < end && i < kMaxBucketSize; i++) {
+      auto &vs = hash_[i];
+      std::sort(vs.begin(), vs.end());
+    }
+  };
+
+  auto set_all_sorted = [this]() {
+      has_sort_.set(i);
+  };
+  std::thread set_sort_bit(set_all_sorted);
+
+  std::vector<std::thread> thread_list;
+  constexpr int segment_size = 104355;
+  for (int i = 0; i < kMaxThreadNumber; i++) {
+    const size_t begin = i * segment_size;
+    const size_t end = (i + 1) * segment_size;
+    thread_list.emplace_back(std::thread(sort_range, begin, end));
   }
+
+  for (auto &x: thread_list) {
+    x.join();
+  }
+  set_sort_bit.join();
 }
 
 void HashTreeTable::PrintMeanStdDev() {
