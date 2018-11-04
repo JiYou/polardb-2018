@@ -171,7 +171,7 @@ void HashTreeTable::Sort() {
   };
 
   auto set_all_sorted = [this]() {
-      has_sort_.set(i);
+      has_sort_.set();
   };
   std::thread set_sort_bit(set_all_sorted);
 
