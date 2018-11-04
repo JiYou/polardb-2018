@@ -23,7 +23,7 @@
 #include <map>
 
 // Is use read queue?
-#define READ_QUEUE 0
+// #define READ_QUEUE 0
 
 // perf counter.
 //#define PERF_COUNT 0 
@@ -40,8 +40,13 @@ constexpr size_t kMaxBucketSize = 17 * 19 * 23 * 29 * 31 + 1;
 constexpr int kSingleRequest = 1;
 constexpr int kMinNumber = 1;
 constexpr int kPageSize = 4096;
-constexpr int kMetaFileNamePrefixLen = 5;
-constexpr int kSplitPos = 16;
+constexpr uint32_t kReadValueCnt = 1024;
+constexpr uint32_t k4MB = kPageSize * 1024;
+constexpr uint32_t kMaxIndexSize = 1024 * 1024 * 1024; // 1GB
+constexpr int kLastCharIn4MB = k4MB - 1;
+constexpr uint64_t k251230MB = 251230;
+constexpr uint64_t kBigFileSize = k251230MB * static_cast<uint64_t>(kPageSize) * static_cast<uint64_t>(kPageSize);
+constexpr uint64_t kIndexMaxOffset = 1024 * 1024 * 1024; // 1GB 
 constexpr int kValueLengthBits = 12;  // stands for 4K
 constexpr size_t kMaxQueueSize = 256; // 4K * 4Kitem ~= 16MB
 constexpr size_t kMaxFlushItem = 64;   // because there are 64 threads r/w.
@@ -96,6 +101,9 @@ int GetFileLength(const std::string& file);
 int FileAppend(int fd, const std::string& value);
 int FileAppend(int fd, const void *buf, size_t len);
 bool FileExists(const std::string& path);
+
+// get aligned buffer size.
+char *GetAlignedBuffer(uint64_t buffer_size);
 
 // FileLock
 class FileLock  {

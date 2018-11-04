@@ -151,4 +151,13 @@ int UnlockFile(FileLock* lock) {
   return result;
 }
 
+char *GetAlignedBuffer(uint64_t bufer_size) {
+  char *buf = nullptr;
+  if (posix_memalign(reinterpret_cast<void**>(&buf), kPageSize, bufer_size)) {
+      DEBUG << "posix_memalign failed!\n";
+      return nullptr;
+  }
+  return buf;
+}
+
 }  // namespace polar_race

@@ -1,16 +1,16 @@
 // Copyright [2018] Alibaba Cloud All rights reserved
 #pragma once
 
-#include "engine_race/spin_lock.h"
 #include "include/engine.h"
-#include "engine_race/util.h"
-#include "engine_race/door_plate.h"
-#include "engine_race/data_store.h"
+#include "spin_lock.h"
+#include "util.h"
+#include "libaio.h"
 
 #include <assert.h>
 #include <stdint.h>
 #include <pthread.h>
 
+#include <bitset>
 #include <chrono>
 #include <thread>
 #include <mutex>
@@ -19,12 +19,161 @@
 #include <deque>
 #include <vector>
 #include <atomic>
-
 #include <string>
 #include <queue>
 #include <map>
 
 namespace polar_race {
+
+#pragma pack(push, 1)
+// totaly 16 bytes. devided by 4096, easy for read.
+struct disk_index {
+  char key[kMaxKeyLen];  // 8 byte
+  uint32_t offset;       // 4 byte
+  uint32_t valid;        // 4 byte
+};
+#pragma pack(pop)
+
+class HashTreeTable {
+ public:
+  // Just these 2 function with lock
+  RetCode Get(const std::string &key, uint64_t *l); // with_lock
+  RetCode Set(const std::string &key, uint64_t l); // with_lock
+  RetCode Get(const char* key, uint64_t *l); // with_lock
+  RetCode Set(const char* key, uint64_t l); // with_lock
+
+  // NOTE: no lock here. Do not call it anywhere.
+  // after load all the entries from disk,
+  // for speed up the lookup, need to sort it.
+  // after some set operations->append to the
+  // hash shard vector.
+  // Such as: bucket[i] has do push_back()
+  // then has_sort_[i] must be false;
+  // then can not use binary_search to find the item.
+  void Sort();
+
+  // print Hash Mean StdDev size of hash shard.
+  void PrintMeanStdDev();
+
+ public:
+  HashTreeTable(): hash_lock_(kMaxBucketSize) {
+    hash_.resize(kMaxBucketSize);
+  }
+  ~HashTreeTable() { }
+
+ private:
+  void LockHashShard(uint32_t index);
+  void UnlockHashShard(uint32_t index);
+
+ public:
+  HashTreeTable(const HashTreeTable &) = delete;
+  HashTreeTable(const HashTreeTable &&) = delete;
+  HashTreeTable &operator=(const HashTreeTable&) = delete;
+  HashTreeTable &operator=(const HashTreeTable&&) = delete;
+ private:
+  // uint64 & uint32_t would taken 16 bytes, if not align with bytes.
+  #pragma pack(push, 1)
+  struct kv_info {
+    uint64_t key;
+    uint32_t offset_4k_; // just the 4k offset in big file.
+                         // if you want get the right pos, need to <<= 12;
+    kv_info(uint64_t k, uint32_t v): key(k), offset_4k_(v) { }
+    kv_info(): key(0), offset_4k_(0) { }
+    bool operator < (const uint64_t k) const {
+      return key < k;
+    }
+    bool operator < (const kv_info &x) const {
+      return key < x.key;
+    }
+    bool operator == (const kv_info &k) const {
+      return key == k.key && offset_4k_ == k.offset_4k_;
+    }
+    bool operator != (const kv_info &k) {
+      return key != k.key || offset_4k_ != k.offset_4k_;
+    }
+  };
+  #pragma pack(pop)
+  std::vector<std::vector<kv_info>> hash_;
+  std::vector<spinlock> hash_lock_;
+  std::bitset<kMaxBucketSize> has_sort_;
+  // the starting write pos of 4K data.
+  uint64_t next_write_pos_ = 0;
+ private:
+  uint32_t compute_pos(uint64_t key);
+  RetCode find(std::vector<kv_info> &vs, bool sorted, uint64_t key, kv_info **ptr);
+};
+
+// This env just support read 1 request a time.
+struct aio_env {
+  aio_env(bool inbuf=true) {
+    // !!! must align, do not use value->data() directly.
+    if (inbuf) {
+      buf = GetAlignedBuffer(k4MB);
+    }
+
+    // prepare the io context.
+    memset(&ctx, 0, sizeof(ctx));
+    if (io_setup(1, &ctx) < 0) {
+      DEBUG << "Error in io_setup" << std::endl;
+    }
+
+    timeout.tv_sec = 0;
+    timeout.tv_nsec = 0;
+
+    iocbs = &iocb;
+
+    memset(&iocb, 0, sizeof(iocb));
+    // iocb->aio_fildes = fd;
+    iocb.aio_lio_opcode = IO_CMD_PREAD;
+    iocb.aio_reqprio = 0;
+    iocb.u.c.buf = buf;
+    // iocb->u.c.buf = buf;
+    iocb.u.c.nbytes = k4MB;
+    // iocb->u.c.offset = offset;
+  }
+
+  void Prepare(int fd, uint64_t offset, char *out=nullptr, uint32_t size=k4MB) {
+    // prepare the io
+    iocb.aio_fildes = fd;
+    iocb.u.c.offset = offset;
+    if (out) {
+      iocb.u.c.buf = out;
+    }
+    if (size != k4MB) {
+      iocb.u.c.nbytes = size;
+    }
+  }
+
+  RetCode Submit() {
+    if ((io_submit(ctx, kSingleRequest, &iocbs)) != kSingleRequest) {
+      DEBUG << "io_submit meet error, " << std::endl;;
+      printf("io_submit error\n");
+      return kIOError;
+    }
+    return kSucc;
+  }
+
+  RetCode WaitOver() {
+    // after submit, need to wait all read over.
+    while (io_getevents(ctx, kSingleRequest, kSingleRequest,
+                      &(events), &(timeout)) != kSingleRequest) {
+      /**/
+    }
+    return kSucc;
+  }
+
+  ~aio_env() {
+    io_destroy(ctx);
+    free(buf);
+  }
+
+  io_context_t ctx;
+  char *buf = nullptr;
+  struct iocb iocb;
+  struct iocb* iocbs = nullptr;
+  struct io_event events;
+  struct timespec timeout;
+};
 
 template<typename KVItem>
 class Queue {
@@ -86,17 +235,16 @@ class EngineRace : public Engine  {
   explicit EngineRace(const std::string& dir,
                       size_t write_queue_size=kMaxQueueSize,
                       size_t read_queue_size=kMaxQueueSize)
-    : db_lock_(NULL),
-    plate_(dir),
-    store_(dir),
+    : dir_(dir),
+    db_lock_(nullptr),
     write_queue_(write_queue_size),
     read_queue_(read_queue_size) {
   }
 #else
-  explicit EngineRace(const std::string& dir)
-    : db_lock_(NULL),
-    plate_(dir),
-    store_(dir),
+  explicit EngineRace(const std::string& dir,
+                      size_t write_queue_size=kMaxQueueSize)
+    : dir_(dir),
+    db_lock_(nullptr),
     write_queue_(write_queue_size) {
   }
 #endif
@@ -114,7 +262,7 @@ class EngineRace : public Engine  {
       Visitor &visitor) override;
 
  private:
-
+  void BuildHashTable();
   void WriteEntry();
 
 #ifdef READ_QUEUE
@@ -124,13 +272,19 @@ class EngineRace : public Engine  {
   void start();
 
  private:
+  std::string dir_;
   FileLock* db_lock_;
-  DoorPlate plate_;
-  DataStore store_;
-
+  int fd_ = -1;
+  char *write_data_buf_ = nullptr; //  256KB
+  char *index_buf_ = nullptr; // 4KB
+  char *read_data_buf_ = nullptr; // 4MB
   std::atomic<bool> stop_{false};
   Queue<write_item> write_queue_;
+  HashTreeTable hash_;
 
+  // started from 1GB. add the left 4KB in
+  // build hash tree table.!
+  uint64_t max_data_offset_ = kMaxIndexSize - kPageSize;
 #ifdef READ_QUEUE
   Queue<read_item> read_queue_;
 #endif
