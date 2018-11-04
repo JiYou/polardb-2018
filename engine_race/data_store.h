@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <unordered_map>
 #include <string>
 
 namespace polar_race {
@@ -17,6 +18,9 @@ struct Location {
   uint32_t offset;
   uint16_t file_no;
   uint16_t len;
+  bool operator == (const Location &l) {
+    return offset == l.offset && l.file_no == file_no;
+  }
 };
 
 inline bool operator==(const Location &l, const Location& r) {
@@ -73,6 +77,9 @@ class DataStore  {
 
   int fd_cache_num_ = 0;
   int *fd_cache_ = nullptr;
+
+  spinlock shared_fd_lock_;
+  std::unordered_map<int, int> shared_fd_;
 
   RetCode OpenCurFile();
 };

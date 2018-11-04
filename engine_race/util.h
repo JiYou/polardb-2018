@@ -34,7 +34,7 @@
 namespace polar_race {
 
 #ifdef PERF_COUNT
-exontexpr uint64_t kNanoToMS = 1000000;
+constexpr int64_t kNanoToMS = 1000000;
 #endif
 
 constexpr uint32_t kMaxKeyLen = 8;

@@ -155,83 +155,74 @@ RetCode DataStore::Append(const std::string& value, Location* location) {
   return kSucc;
 }
 
-static void read_page(int fd, char *buf, int file_offset) {
-    constexpr int kSingleRequest = 1;
-    constexpr int kPageSize = 4096;
-
-    struct aio_env {
-      aio_env() {
-        // prepare the io context.
-        memset(&ctx, 0, sizeof(ctx));
-        if (io_setup(1, &ctx) < 0) {
-          DEBUG << "Error in io_setup" << std::endl;
-        }
-
-        timeout.tv_sec = 0;
-        timeout.tv_nsec = 0;
-
-        iocbs = &iocb;
-
-        memset(&iocb, 0, sizeof(iocb));
-        // iocb->aio_fildes = fd;
-        iocb.aio_lio_opcode = IO_CMD_PREAD;
-        iocb.aio_reqprio = 0;
-        // iocb->u.c.buf = buf;
-        iocb.u.c.nbytes = kPageSize;
-        // iocb->u.c.offset = offset;
-      }
-
-      ~aio_env() {
-        io_destroy(ctx);
-      }
-
-      io_context_t ctx;
-      struct iocb iocb;
-      struct iocb* iocbs;
-      struct io_event events;
-      struct timespec timeout;
-    };
-
-    static thread_local aio_env ae;
-    ae.iocb.aio_fildes = fd;
-    ae.iocb.u.c.buf = buf;
-    ae.iocb.u.c.offset = file_offset;
-
-    int ret = 0;
-    if ((ret = io_submit(ae.ctx, kSingleRequest, &(ae.iocbs))) != kSingleRequest) {
-      DEBUG << "io_submit meet error, ret = " << ret << std::endl;;
-      printf("io_submit error\n");
-      return;
+struct aio_env {
+  aio_env() {
+    // !!! must align, do not use value->data() directly.
+    if (posix_memalign(reinterpret_cast<void**>(&buf), kPageSize, kPageSize)) {
+      DEBUG << "posix_memalign failed!\n";
     }
 
-    // after submit, need to wait all read over.
-    int write_over_cnt = 0;
-
-    while (write_over_cnt != kSingleRequest) {
-      constexpr int max_number = kSingleRequest;
-      int num_events = io_getevents(ae.ctx, kSingleRequest, max_number, &(ae.events), &(ae.timeout));
-      // need to call for (i = 0; i < num_events; i++) events[i].call_back();
-      write_over_cnt += num_events;
+    // prepare the io context.
+    memset(&ctx, 0, sizeof(ctx));
+    if (io_setup(1, &ctx) < 0) {
+      DEBUG << "Error in io_setup" << std::endl;
     }
-}
+
+    timeout.tv_sec = 0;
+    timeout.tv_nsec = 0;
+
+    iocbs = &iocb;
+
+    memset(&iocb, 0, sizeof(iocb));
+    // iocb->aio_fildes = fd;
+    iocb.aio_lio_opcode = IO_CMD_PREAD;
+    iocb.aio_reqprio = 0;
+    // iocb->u.c.buf = buf;
+    iocb.u.c.nbytes = kPageSize;
+    // iocb->u.c.offset = offset;
+  }
+
+  ~aio_env() {
+    io_destroy(ctx);
+    free(buf);
+  }
+
+  io_context_t ctx;
+  char *buf = nullptr;
+  struct iocb iocb;
+  struct iocb* iocbs;
+  struct io_event events;
+  struct timespec timeout;
+};
+
 
 RetCode DataStore::BatchRead(std::vector<read_item*> &to_read, std::vector<Location> &file_pos) {
   // set io_ctx
   return kSucc;
 }
 
-RetCode DataStore::Read(const Location& l, std::string* value) {
-  static thread_local char *buf = nullptr;
 
-  // !!! must align, do not use value->data() directly.
-  if (!buf) {
-    if (posix_memalign(reinterpret_cast<void**>(&buf), kPageSize, kPageSize)) {
-      DEBUG << "posix_memalign failed!\n";
+RetCode DataStore::Read(const Location& l, std::string* value) {
+  static thread_local aio_env ae;
+  static thread_local Location pre_pos;
+  static thread_local bool has_read_ = false;
+
+  if (has_read_ && pre_pos == l) {
+    // hit previous read content.
+    // manual memcpy
+    value->clear();
+    value->resize(kPageSize);
+    uint64_t *to = reinterpret_cast<uint64_t*>(const_cast<char*>(value->data()));
+    uint64_t *from = reinterpret_cast<uint64_t*>(ae.buf);
+    for (int i = 0; i < 512; i++) {
+      *to++ = *from++;
     }
+    return kSucc;
   }
 
+  // if not hit previous cache.
+  // find or open the related fd.
   int fd = -1;
-
   bool to_close = false;
   if (l.file_no >= fd_cache_num_ || !fd_cache_[l.file_no]) {
     fd = open(FileName(dir_, l.file_no).c_str(), O_RDONLY | O_DIRECT, 0644);
@@ -244,16 +235,42 @@ RetCode DataStore::Read(const Location& l, std::string* value) {
     fd = fd_cache_[l.file_no];
   }
 
+  // prepare the io
+  ae.iocb.aio_fildes = fd;
+  ae.iocb.u.c.buf = ae.buf;
+  ae.iocb.u.c.offset = l.offset;
+
+  if ((io_submit(ae.ctx, kSingleRequest, &(ae.iocbs))) != kSingleRequest) {
+    DEBUG << "io_submit meet error, " << std::endl;;
+    printf("io_submit error\n");
+    return kIOError;
+  }
+
+  // Task begin=========
   value->clear();
   value->resize(l.len);
-  read_page(fd, buf, l.offset);
+  pre_pos = l;
+  has_read_ = true;
+  // manual memcpy
+  uint64_t *to = reinterpret_cast<uint64_t*>(const_cast<char*>(value->data()));
+  uint64_t *from = reinterpret_cast<uint64_t*>(ae.buf);
+
+  // Task end===========
+
+  // after submit, need to wait all read over.
+  int write_over_cnt = 0;
+  while (write_over_cnt != kSingleRequest) {
+    constexpr int min_number = 1;
+    constexpr int max_number = kSingleRequest;
+    int num_events = io_getevents(ae.ctx, min_number, max_number, &(ae.events), &(ae.timeout));
+    // need to call for (i = 0; i < num_events; i++) events[i].call_back();
+    write_over_cnt += num_events;
+  }
+
   if (to_close) {
     close(fd);
   }
 
-  // manual memcpy
-  uint64_t *to = reinterpret_cast<uint64_t*>(const_cast<char*>(value->data()));
-  uint64_t *from = reinterpret_cast<uint64_t*>(buf);
   for (int i = 0; i < 512; i++) {
     *to++ = *from++;
   }
