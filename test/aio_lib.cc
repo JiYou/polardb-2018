@@ -40,26 +40,28 @@ struct aio_env {
     timeout.tv_sec = 0;
     timeout.tv_nsec = 0;
 
-    iocbs = &iocb;
     memset(&iocb, 0, sizeof(iocb));
-    // iocb->aio_fildes = fd;
-    iocb.aio_lio_opcode = IO_CMD_PREAD;
-    iocb.aio_reqprio = 0;
-    // iocb->u.c.buf = buf;
-    iocb.u.c.nbytes = kPageSize;
-    // iocb->u.c.offset = offset;
+    for (int i = 0; i < kSingleRequest; i++) {
+      iocbs[i] = iocb + i;
+      iocb[i].aio_lio_opcode = IO_CMD_PREAD;
+      iocb[i].aio_reqprio = 0;
+      iocb[i].u.c.nbytes = kPageSize;
+      // iocb->u.c.offset = offset;
+      // iocb->aio_fildes = fd;
+      // iocb->u.c.buf = buf;
+    }
   }
 
   void Prepare(int fd, uint64_t offset, char *out, uint32_t size) {
     // prepare the io
-    iocb.aio_fildes = fd;
-    iocb.u.c.offset = offset;
-    iocb.u.c.buf = out;
-    iocb.u.c.nbytes = size;
+    iocb[0].aio_fildes = fd;
+    iocb[0].u.c.offset = offset;
+    iocb[0].u.c.buf = out;
+    iocb[0].u.c.nbytes = size;
   }
 
   RetCode Submit() {
-    if ((io_submit(ctx, kSingleRequest, &iocbs)) != kSingleRequest) {
+    if ((io_submit(ctx, kSingleRequest, iocbs)) != kSingleRequest) {
       DEBUG << "io_submit meet error, " << std::endl;;
       printf("io_submit error\n");
       return kIOError;
@@ -70,7 +72,7 @@ struct aio_env {
   void WaitOver() {
     // after submit, need to wait all read over.
     while (io_getevents(ctx, kSingleRequest, kSingleRequest,
-                      &(events), &(timeout)) != kSingleRequest) {
+                        events, &(timeout)) != kSingleRequest) {
       /**/
     }
   }
@@ -80,9 +82,9 @@ struct aio_env {
   }
 
   io_context_t ctx;
-  struct iocb iocb;
-  struct iocb* iocbs;
-  struct io_event events;
+  struct iocb iocb[kSingleRequest];
+  struct iocb* iocbs[kSingleRequest];
+  struct io_event events[kSingleRequest];
   struct timespec timeout;
 };
 
