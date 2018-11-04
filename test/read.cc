@@ -49,7 +49,7 @@ void read_thread(Engine *engine, char begin_char) {
                   cond.notify_all();
                   return;
                 }
-                if (cnt % 1000 == 0) std::cout << "cnt = " << cnt << std::endl;
+                if (cnt % 10000 == 0) std::cout << "+";
                 std::string G = F + o;
                 std::string X;
                 auto ret = engine->Read(G, &X);

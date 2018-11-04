@@ -49,7 +49,7 @@ void write_thread(Engine *engine, char begin_char) {
                   cond.notify_all();
                   return;
                 }
-                if (cnt % 1000 == 0) std::cout << "cnt = " << cnt << std::endl;
+                if (cnt % 10000 == 0) std::cout << "+";
                 std::string G = F + o;
                 auto ret = engine->Write(G, std::string(V, 4096));
                 assert (ret == kSucc);

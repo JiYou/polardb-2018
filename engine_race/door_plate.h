@@ -50,8 +50,9 @@ class IndexHash {
 
 class HashTreeTable {
  public:
-  RetCode Get(const std::string &key, Location *l);
-  RetCode Set(const std::string &key, const Location &l);
+  // Just these 2 function with lock
+  RetCode Get(const std::string &key, Location *l); // with_lock
+  RetCode Set(const std::string &key, const Location &l); // with_lock
 
   // NOTE: no lock here. Do not call it anywhere.
   // after load all the entries from disk,

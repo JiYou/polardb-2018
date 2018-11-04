@@ -17,6 +17,8 @@
 #include <iostream>
 #include <utility>
 #include <algorithm>
+#include <thread>
+#include <atomic>
 
 namespace polar_race {
 
@@ -218,14 +220,20 @@ RetCode DoorPlate::Init() {
     }
   );
 
-  // rebuild the index.
-  for (auto fn: files) {
+  // NOTE: in real project, if one index file
+  // failed, maybe need to deal with this case.
+  // but in race, should exit.
+  std::atomic<bool> meet_error{false};
+
+  auto insert_file = [this, &meet_error](const std::string &fn) {
+    // every thread open single file to insert into hashtable.
     // open file to read.
     std::string file_name = dir_ + "/" + fn;
     int fd = open(file_name.c_str(), O_RDONLY, 0644);
     if (fd < 0) {
       DEBUG << "open " << file_name << " failed" << std::endl;
-      return kIOError;
+      meet_error = true;
+      return;
     }
 
     // at the begining of file.
@@ -237,16 +245,36 @@ RetCode DoorPlate::Init() {
       }
     }
     close(fd);
+  };
+
+  auto get_last = [this, &files]() {
+    // get the last file no, and offset;
+    if (!files.empty()) {
+      std::string file_name = files.back();
+      last_no_ = std::atoi(file_name.c_str() + kMetaFileNamePrefixLen);
+      int len = GetFileLength(FileName(dir_, last_no_));
+      if (len > 0) {
+        offset_ = len;
+      }
+    }
+  };
+  std::thread thd_get_last(get_last);
+
+  // rebuild the index.
+  // Here use mutli-thread to load the indexs.
+  std::vector<std::thread> thread_list;
+  for (auto fn: files) {
+    thread_list.emplace_back(std::thread(insert_file, fn));
   }
 
-  // get the last file no, and offset;
-  if (!files.empty()) {
-    std::string file_name = files.back();
-    last_no_ = std::atoi(file_name.c_str() + kMetaFileNamePrefixLen);
-    int len = GetFileLength(FileName(dir_, last_no_));
-    if (len > 0) {
-      offset_ = len;
-    }
+  for (auto &x: thread_list) {
+    x.join();
+  }
+  thd_get_last.join();
+
+  if (meet_error) {
+    DEBUG << "build hash: finally meet error" << std::endl;
+    return kIOError;
   }
 
   // sort the hash table.
