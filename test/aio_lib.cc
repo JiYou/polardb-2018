@@ -54,14 +54,19 @@ struct aio_env {
 
   void Prepare(int fd, uint64_t offset, char *out, uint32_t size) {
     // prepare the io
-    iocb[0].aio_fildes = fd;
-    iocb[0].u.c.offset = offset;
-    iocb[0].u.c.buf = out;
-    iocb[0].u.c.nbytes = size;
+    iocb[index].aio_fildes = fd;
+    iocb[index].u.c.offset = offset;
+    iocb[index].u.c.buf = out;
+    iocb[index].u.c.nbytes = size;
+    index++;
+  }
+
+  void Clear() {
+    index = 0;
   }
 
   RetCode Submit() {
-    if ((io_submit(ctx, kSingleRequest, iocbs)) != kSingleRequest) {
+    if ((io_submit(ctx, index, iocbs)) != kSingleRequest) {
       DEBUG << "io_submit meet error, " << std::endl;;
       printf("io_submit error\n");
       return kIOError;
@@ -71,8 +76,8 @@ struct aio_env {
 
   void WaitOver() {
     // after submit, need to wait all read over.
-    while (io_getevents(ctx, kSingleRequest, kSingleRequest,
-                        events, &(timeout)) != kSingleRequest) {
+    while (io_getevents(ctx, index, index,
+                        events, &(timeout)) != index) {
       /**/
     }
   }
@@ -81,6 +86,7 @@ struct aio_env {
     io_destroy(ctx);
   }
 
+  int index = 0;
   io_context_t ctx;
   struct iocb iocb[kSingleRequest];
   struct iocb* iocbs[kSingleRequest];
@@ -106,6 +112,7 @@ int main(void) {
   ev.Prepare(fd, 0 /*offset*/, buf, polar_race::kPageSize);
   ev.Submit();
   ev.WaitOver();
+  ev.Clear();
 
   for (int i = 0; i < 10; i++) {
     std::cout << "[] = " << buf[i] << std::endl;
