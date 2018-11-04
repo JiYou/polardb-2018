@@ -12,6 +12,7 @@
 #include <vector>
 #include <algorithm>
 #include <math.h>
+#include <numeric>
 
 namespace polar_race {
 
