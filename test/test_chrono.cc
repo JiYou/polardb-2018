@@ -14,8 +14,9 @@ int main()
         sink = std::accumulate(v.begin(), v.end(), 0u); // make sure it's a side effect
         // record end time
         auto end = std::chrono::system_clock::now();
-        std::chrono::microseconds diff = end-start;
+        //std::chrono::microseconds diff = end-start;
+        auto mis = std::chrono::duration_cast<std::chrono::microseconds>(end-start);
         std::cout << "Time to fill and iterate a vector of "
-                  << size << " ints : " << diff.count() << " microseconds\n";
+                  << size << " ints : " << (mis).count() << " microseconds\n";
     }
 }

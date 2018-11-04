@@ -209,7 +209,7 @@ static void read_page(int fd, char *buf, int file_offset) {
 
     while (write_over_cnt != kSingleRequest) {
       constexpr int max_number = kSingleRequest;
-      int num_events = io_getevents(ae.ctx, min_number, max_number, &(ae.events), &(ae.timeout));
+      int num_events = io_getevents(ae.ctx, kSingleRequest, max_number, &(ae.events), &(ae.timeout));
       // need to call for (i = 0; i < num_events; i++) events[i].call_back();
       write_over_cnt += num_events;
     }
