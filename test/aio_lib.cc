@@ -109,14 +109,19 @@ int main(void) {
     DEBUG << "open file failed!\n";
   }
 
-  ev.Prepare(fd, 0 /*offset*/, buf, polar_race::kPageSize);
-  ev.Submit();
-  ev.WaitOver();
-  ev.Clear();
+  auto read_test = [&](uint64_t offset, uint64_t size) {
+    ev.Prepare(fd, offset, buf, size);
+    ev.Submit();
+    ev.WaitOver();
+    ev.Clear();
+    for (int i = 0; i < 10; i++) {
+      std::cout << buf[i];
+    }
+    std::cout << std::endl;
+  };
 
-  for (int i = 0; i < 10; i++) {
-    std::cout << "[] = " << buf[i] << std::endl;
-  }
+  read_test(0, polar_race::kPageSize);
+  read_test(1024, 1024);
 
   close(fd);
   free(buf);
