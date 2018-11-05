@@ -270,8 +270,9 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   // the fd_ is opened.
   // after build Hash table, also record the next to write pos.
   BEGIN_POINT(begin_build_hash_table);
-  engine_race->BuildHashTable();
+  //engine_race->BuildHashTable();
   END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
+
   engine_race->hash_.Sort();
   engine_race->hash_.PrintMeanStdDev();
 
@@ -283,68 +284,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 
 void EngineRace::BuildHashTable() {
   // the file fd has been open.
-
-  // read disk thread is producer.
-  // producer just need to put the char* buf
-  // into Q.
-  // actually it contains char*
-  // build hash index is the consumer.
-  Queue<char> q(4);
-  std::atomic<bool> read_over_{false};
-
-  // to read disk.
-  auto read_disk = [this, &q, &read_over_]() {
-    // start from the begin of file.
-    uint64_t offset = 0;
-    char *buf = nullptr;
-    bool is_valid = true;
-    // the index part is maxiumly 1GB.
-    for (uint32_t i = 0; i < kMaxIndexSize / k4MB && is_valid; i++) {
-      buf = GetAlignedBuffer(k4MB);
-      read_aio_.PrepareRead(offset, buf, k4MB);
-      read_aio_.Submit();
-      read_aio_.WaitOver();
-      q.Push(buf);
-      is_valid = buf[kLastCharIn4MB];
-      offset += k4MB;
-    }
-    read_over_ = true;
-  };
-  std::thread thd_read_disk(read_disk);
-
-  auto build_index = [this, &q, &read_over_] () {
-    std::vector<char*> buf_list;
-    for  (uint32_t i = 0; i < kMaxIndexSize / k4MB && !read_over_; i++) {
-      q.Pop(&buf_list, false/*read_disk*/);
-      for (auto &buf: buf_list) {
-        struct disk_index *ar = reinterpret_cast<struct disk_index*>(buf);
-        for (uint32_t j = 0; j < k4MB / sizeof(struct disk_index); j++) {
-          struct disk_index *ref = ar + j;
-          if (ref->valid) {
-            hash_.Set(ref->key, ref->offset);
-            uint64_t pos = ref->offset;
-            pos <<= 12;
-            // where the data to write begin.
-            max_data_offset_ = std::max(max_data_offset_, pos);
-          }
-        }
-        free(buf);
-      }
-    }
-  };
-  std::thread thd_build_index(build_index);
-
-  thd_read_disk.join();
-  thd_build_index.join();
-
-  // free the left bufer
-  std::vector<char*> buf_list;
-  q.Pop(&buf_list, false);
-  for (auto &buf: buf_list) {
-    free(buf);
-  }
-
-  max_data_offset_ += kPageSize;
 }
 
 EngineRace::~EngineRace() {

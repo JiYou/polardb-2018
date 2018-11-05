@@ -29,7 +29,7 @@ namespace polar_race {
 // totaly 16 bytes. devided by 4096, easy for read.
 struct disk_index {
   char key[kMaxKeyLen];  // 8 byte
-  uint32_t offset;       // 4 byte
+  uint32_t offset_4k_;       // 4 byte
   uint32_t valid;        // 4 byte
 };
 #pragma pack(pop)
@@ -310,7 +310,7 @@ class EngineRace : public Engine  {
 
   // started from 1GB. add the left 4KB in
   // build hash tree table.!
-  uint64_t max_data_offset_ = kMaxIndexSize - kPageSize;
+  uint64_t max_data_offset_ = kMaxIndexSize;
 #ifdef READ_QUEUE
   Queue<read_item> read_queue_;
 #endif
