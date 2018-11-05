@@ -114,9 +114,11 @@ class HashTreeTable {
 // io_.WaitOver();
 // io_.Clear();
 struct aio_env {
+
   void SetFD(int fd_) {
     fd = fd_;
   }
+
   aio_env() {
     // prepare the io context.
     memset(&ctx, 0, sizeof(ctx));
@@ -132,15 +134,15 @@ struct aio_env {
       iocbs[i] = iocb + i;
       iocb[i].aio_lio_opcode = IO_CMD_PREAD;
       iocb[i].aio_reqprio = 0;
-      // iocb[i].u.c.nbytes = kPageSize;
-      // iocb[i].aio_fildes = fd;
+      iocb[i].u.c.nbytes = kPageSize;
       // iocb->u.c.offset = offset;
+      // iocb->aio_fildes = fd;
       // iocb->u.c.buf = buf;
     }
   }
 
-  // NOTE: do not submit READ/WRITE at the same time.
   void PrepareRead(uint64_t offset, char *out, uint32_t size) {
+    // prepare the io
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
@@ -149,9 +151,7 @@ struct aio_env {
     index++;
   }
 
-  // NOTE: do not submit read/write at the same time.
   void PrepareWrite(uint64_t offset, char *out, uint32_t size) {
-    // need to set this every write.
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
@@ -185,7 +185,7 @@ struct aio_env {
     io_destroy(ctx);
   }
 
-  int fd = -1;
+  int fd = 0;
   int index = 0;
   io_context_t ctx;
   struct iocb iocb[kMaxIOEvent];

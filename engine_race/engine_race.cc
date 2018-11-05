@@ -269,7 +269,9 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   // HashTable.
   // the fd_ is opened.
   // after build Hash table, also record the next to write pos.
+  BEGIN_POINT(begin_build_hash_table);
   engine_race->BuildHashTable();
+  END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
   engine_race->hash_.Sort();
   engine_race->hash_.PrintMeanStdDev();
 

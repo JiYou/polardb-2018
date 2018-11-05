@@ -16,8 +16,8 @@
 #include <iostream>
 #include <deque>
 #include <vector>
+#include <numeric>
 #include <atomic>
-
 #include <string>
 #include <queue>
 #include <map>
@@ -28,6 +28,17 @@
 // perf counter.
 //#define PERF_COUNT 0 
 
+#ifdef PERF_COUNT
+  #define BEGIN_POINT(x)  auto x = std::chrono::system_clock::now()
+  #define END_POINT(y,x, msg)  do {                                                                       \
+    auto y = std::chrono::system_clock::now();                                                            \
+    auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(data_end_time - data_start_time);    \
+    std::cout << msg << diff.count() / kNanoToMS << " (ms)" << std::endl;                                 \
+  } while (0)
+#else
+  #define BEGIN_POINT(x)
+  #define END_POINT(y,x, msg)
+#endif
 
 #define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"()"<<"msg="<<strerror(errno)
 
