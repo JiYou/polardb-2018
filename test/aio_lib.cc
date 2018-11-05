@@ -27,9 +27,14 @@
 namespace polar_race {
 // begin of namespace polar_race
 
-const char *file_name = "DATA_0";
+const char *file_name = "/tmp/test_engine/DB";
 
 struct aio_env {
+
+  void SetFD(int fd_) {
+    fd = fd_;
+  }
+
   aio_env() {
     // prepare the io context.
     memset(&ctx, 0, sizeof(ctx));
@@ -52,7 +57,7 @@ struct aio_env {
     }
   }
 
-  void PrepareRead(int fd, uint64_t offset, char *out, uint32_t size) {
+  void PrepareRead(uint64_t offset, char *out, uint32_t size) {
     // prepare the io
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
@@ -62,7 +67,7 @@ struct aio_env {
     index++;
   }
 
-  void PrepareWrite(int fd, uint64_t offset, char *out, uint32_t size) {
+  void PrepareWrite(uint64_t offset, char *out, uint32_t size) {
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
@@ -96,6 +101,7 @@ struct aio_env {
     io_destroy(ctx);
   }
 
+  int fd = 0;
   int index = 0;
   io_context_t ctx;
   struct iocb iocb[kMaxIOEvent];
@@ -119,8 +125,9 @@ int main(void) {
     DEBUG << "open file failed!\n";
   }
 
+  ev.SetFD(fd);
   auto read_test = [&](uint64_t offset, uint64_t size) {
-    ev.PrepareRead(fd, offset, buf, size);
+    ev.PrepareRead(offset, buf, size);
     ev.Submit();
     ev.WaitOver();
     ev.Clear();
@@ -146,9 +153,9 @@ int main(void) {
   auto two_read_request = [&]() {
     char *a = buf, *b = buf + 1024;
     char *c = buf + 2048;
-    ev.PrepareRead(fd, 0, a, 1024); // read first 1KB
-    ev.PrepareRead(fd, 1024, b, 1024); // read second 1KB
-    ev.PrepareRead(fd, 2048, c, 2048); // read 3,4 1KB
+    ev.PrepareRead(0, a, 1024); // read first 1KB
+    ev.PrepareRead(1024, b, 1024); // read second 1KB
+    ev.PrepareRead(2048, c, 2048); // read 3,4 1KB
     ev.Submit();
     ev.WaitOver();
     ev.Clear();
@@ -175,7 +182,7 @@ int main(void) {
   auto write_request = [&]() {
     char *a = buf, *b = buf + 1024;
     char *c = buf + 2048;
-    ev.PrepareWrite(fd, polar_race::kPageSize, write_content, polar_race::kPageSize);
+    ev.PrepareWrite(polar_race::kPageSize, write_content, polar_race::kPageSize);
     ev.Submit();
     ev.WaitOver();
     ev.Clear();

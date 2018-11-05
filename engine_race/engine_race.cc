@@ -191,9 +191,21 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   std::string file_name_str = name + "/" + kBigFileName;
   const char *file_name = file_name_str.c_str();
 
+  // create the dir.
+  if (!FileExists(name)
+      && 0 != mkdir(name.c_str(), 0755)) {
+    DEBUG << "mkdir " << name << " failed "  << std::endl;
+    return kIOError;
+  }
+
   // use truncate to create the big file.
   auto create_big_file = [&engine_race, &meet_error, &name, &file_name]() {
     int fd = open(file_name, O_CREAT | O_RDWR, S_IWRITE | S_IREAD);
+    if (fd < 0) {
+      DEBUG << "open big file failed!\n";
+      meet_error = true;
+      return;
+    }
     // this would not change the file content.
     if (ftruncate(fd, kBigFileSize) < 0) {
       DEBUG << "create big file failed\n";
