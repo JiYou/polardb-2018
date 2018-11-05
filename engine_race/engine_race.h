@@ -28,19 +28,20 @@ namespace polar_race {
 #pragma pack(push, 1)
 // totaly 16 bytes. devided by 4096, easy for read.
 struct disk_index {
-  char key[kMaxKeyLen];  // 8 byte
+  char key[kMaxKeyLen];      // 8 byte
   uint32_t offset_4k_;       // 4 byte
-  uint32_t valid;        // 4 byte
+  uint32_t valid;            // 4 byte
 };
 #pragma pack(pop)
 
 class HashTreeTable {
  public:
-  // Just these 2 function with lock
-  RetCode Get(const std::string &key, uint64_t *l); // with_lock
-  RetCode Set(const std::string &key, uint64_t l); // with_lock
-  RetCode Get(const char* key, uint64_t *l); // with_lock
-  RetCode Set(const char* key, uint64_t l); // with_lock
+  // note, l_bytes means the location in big file
+  // related to bytes, not 4KB
+  RetCode Get(const std::string &key, uint64_t *l_bytes); // with_lock
+  RetCode Set(const std::string &key, uint64_t l_bytes); // with_lock
+  RetCode Get(const char* key, uint64_t *l_bytes); // with_lock
+  RetCode Set(const char* key, uint64_t l_bytes); // with_lock
 
   // NOTE: no lock here. Do not call it anywhere.
   // after load all the entries from disk,
@@ -293,8 +294,12 @@ class EngineRace : public Engine  {
  private:
   std::string dir_;
   FileLock* db_lock_;
-  int fd_ = -1; // the big file.
+
+  // point to the big file.
+  int fd_ = -1;
+  // read aio, NOTE: no thread safe.
   struct aio_env write_aio_;
+  // write aio: NOTE: no thread safe.
   struct aio_env read_aio_;
 
   char *write_data_buf_ = nullptr; //  256KB
@@ -316,7 +321,6 @@ class EngineRace : public Engine  {
 #endif
 
 #ifdef PERF_COUNT
-
   // perfcounters for the read items.
   //
   // How many interval of items to print stat time.

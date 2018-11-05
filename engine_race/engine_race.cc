@@ -209,7 +209,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
     // this would not change the file content.
     if (ftruncate(fd, kBigFileSize) < 0) {
       DEBUG << "create big file failed\n";
-      delete engine_race;
       meet_error = true;
       return;
     }
@@ -243,14 +242,17 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   auto alloc_buf = [&engine_race, &meet_error] () {
     engine_race->index_buf_ = GetAlignedBuffer(kPageSize);
     if (!(engine_race->index_buf_)) {
+      meet_error = true;
       return;
     }
-    engine_race->write_data_buf_ = GetAlignedBuffer(kPageSize * kMaxThreadNumber);
+    engine_race->write_data_buf_ = GetAlignedBuffer(kPageSize * kMaxThreadNumber + 2 * kPageSize);
     if (!(engine_race->write_data_buf_)) {
+      meet_error = true;
       return;
     }
-    engine_race->read_data_buf_ = GetAlignedBuffer(kPageSize * kReadValueCnt);
+    engine_race->read_data_buf_ = GetAlignedBuffer(k4MB);
     if (!(engine_race->read_data_buf_)) {
+      meet_error = true;
       return;
     }
   };
@@ -270,7 +272,7 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   // the fd_ is opened.
   // after build Hash table, also record the next to write pos.
   BEGIN_POINT(begin_build_hash_table);
-  //engine_race->BuildHashTable();
+  engine_race->BuildHashTable();
   END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
 
   engine_race->hash_.Sort();
@@ -284,6 +286,118 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 
 void EngineRace::BuildHashTable() {
   // the file fd has been open.
+
+  // pool of free buffers.
+  std::mutex free_buffer_lock;
+  std::vector<char*> free_buffers;
+
+  auto get_free_buf = [&]() {
+    std::unique_lock<std::mutex> l(free_buffer_lock);
+    char *buf = nullptr;
+    if (free_buffers.size() > 0) {
+      buf = free_buffers.back();
+      free_buffers.pop_back();
+    } else {
+      buf = GetAlignedBuffer(k4MB);
+    }
+    return buf;
+  };
+
+  auto put_free_buf = [&](char *buf) {
+    std::unique_lock<std::mutex> l(free_buffer_lock);
+    free_buffers.push_back(buf);
+  };
+
+  auto release_free_buf = [&]() {
+    std::unique_lock<std::mutex> l(free_buffer_lock);
+    for (auto &x: free_buffers) {
+      free(x);
+    }
+    free_buffers.clear();
+  };
+
+  std::vector<char*> buffers;
+  std::atomic<bool> read_over{false};
+  std::mutex lock;
+
+  // read 4MB from disk. this is a single read.
+  auto get_disk_content = [&](uint64_t offset) {
+    char *buf = get_free_buf();
+    read_aio_.Clear();
+    read_aio_.PrepareRead(offset, buf, k4MB);
+    read_aio_.Submit();
+    read_aio_.WaitOver();
+    return buf;
+  };
+
+  uint64_t max_data_offset = 0;
+  auto buf_to_hash = [&](char *buf) {
+    // deal with the buffer.
+    if (buf) {
+      // read the buf content then put them into hash table.
+      struct disk_index *array = reinterpret_cast<struct disk_index*>(buf);
+      for (uint32_t i = 0; i < k4MB / sizeof(struct disk_index); i++) {
+        // puth every index into hash table.
+        auto ref = array + i;
+        if (ref->valid) {
+          hash_.Set(ref->key, ref->offset_4k_ << kValueLengthBits);
+          max_data_offset = std::max(max_data_offset, ref->offset_4k_ << kValueLengthBits);
+        }
+      }
+      put_free_buf(buf);
+    }
+  };
+
+  // disk_read thread:
+  // read index from [0 ~ 1GB] area.
+  // here contains the checkpoint for
+  // kv index.
+  auto disk_read = [&]() {
+    int index_offset = 0;
+    while (!read_over) {
+      // Here will spend many time to read content from disk.
+      auto buf = get_disk_content(index_offset);
+      index_offset += k4MB;
+      read_over = !buf[kLastCharIn4MB];
+
+      // try to put the disk into bufers;
+      std::unique_lock<std::mutex> l(lock);
+      buffers.push_back(buf);
+    }
+  };
+
+  // insert all the kv-pos into hash table.
+  auto insert_hash = [&]() {
+    while (!read_over) {
+      char *buf = nullptr;
+      lock.lock();
+      // deal with all the buffer.
+      // get the last buffer.
+      if (buffers.size() > 0) {
+        buf = buffers.back();
+        buffers.pop_back();
+      }
+      lock.unlock();
+      buf_to_hash(buf);
+    }
+    // read over. deal all the left buffers.
+    for (auto &x: buffers) {
+      buf_to_hash(x);
+    }
+    // free all the buffer
+    // avoid memory leak.
+    release_free_buf();
+  };
+
+  std::thread thd_disk_read(disk_read);
+  std::thread thd_insert_hash(insert_hash);
+
+  thd_disk_read.join();
+  thd_insert_hash.join();
+
+  // all the index part has read over.
+  // then need to read the data part.
+  
 }
 
 EngineRace::~EngineRace() {
