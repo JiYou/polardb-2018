@@ -103,49 +103,69 @@ class HashTreeTable {
   RetCode find(std::vector<kv_info> &vs, bool sorted, uint64_t key, kv_info **ptr);
 };
 
-// This env just support read 1 request a time.
+// this struct does not manage file & buffer
+// it just set env for aio.
+// Usage:
+// struct aio_env io_;
+// io_.SetFD(fd);
+// io_.PrepareRead();
+// io_.PrepareRead();
+// io_.Submit();
+// io_.WaitOver();
+// io_.Clear();
 struct aio_env {
-  aio_env(bool inbuf=true) {
-    // !!! must align, do not use value->data() directly.
-    if (inbuf) {
-      buf = GetAlignedBuffer(k4MB);
-    }
-
+  void SetFD(int fd_) {
+    fd = fd_;
+  }
+  aio_env() {
     // prepare the io context.
     memset(&ctx, 0, sizeof(ctx));
-    if (io_setup(1, &ctx) < 0) {
+    if (io_setup(kMaxIOEvent, &ctx) < 0) {
       DEBUG << "Error in io_setup" << std::endl;
     }
 
     timeout.tv_sec = 0;
     timeout.tv_nsec = 0;
 
-    iocbs = &iocb;
-
     memset(&iocb, 0, sizeof(iocb));
-    // iocb->aio_fildes = fd;
-    iocb.aio_lio_opcode = IO_CMD_PREAD;
-    iocb.aio_reqprio = 0;
-    iocb.u.c.buf = buf;
-    // iocb->u.c.buf = buf;
-    iocb.u.c.nbytes = k4MB;
-    // iocb->u.c.offset = offset;
+    for (int i = 0; i < kMaxIOEvent; i++) {
+      iocbs[i] = iocb + i;
+      iocb[i].aio_lio_opcode = IO_CMD_PREAD;
+      iocb[i].aio_reqprio = 0;
+      iocb[i].u.c.nbytes = kPageSize;
+      iocb[i].aio_fildes = fd;
+      // iocb->u.c.offset = offset;
+      // iocb->u.c.buf = buf;
+    }
   }
 
-  void Prepare(int fd, uint64_t offset, char *out=nullptr, uint32_t size=k4MB) {
+  // NOTE: do not submit READ/WRITE at the same time.
+  void PrepareRead(uint64_t offset, char *out, uint32_t size) {
     // prepare the io
-    iocb.aio_fildes = fd;
-    iocb.u.c.offset = offset;
-    if (out) {
-      iocb.u.c.buf = out;
-    }
-    if (size != k4MB) {
-      iocb.u.c.nbytes = size;
-    }
+    // iocb[index].aio_fildes = fd;
+    iocb[index].u.c.offset = offset;
+    iocb[index].u.c.buf = out;
+    iocb[index].u.c.nbytes = size;
+    iocb[index].aio_lio_opcode = IO_CMD_PREAD;
+    index++;
+  }
+
+  // NOTE: do not submit read/write at the same time.
+  void PrepareWrite(uint64_t offset, char *out, uint32_t size) {
+    // iocb[index].aio_fildes = fd;
+    iocb[index].u.c.offset = offset;
+    iocb[index].u.c.buf = out;
+    iocb[index].u.c.nbytes = size;
+    iocb[index].aio_lio_opcode = IO_CMD_PWRITE;
+    index++;
+  }
+
+  void Clear() {
+    index = 0;
   }
 
   RetCode Submit() {
-    if ((io_submit(ctx, kSingleRequest, &iocbs)) != kSingleRequest) {
+    if ((io_submit(ctx, index, iocbs)) != index) {
       DEBUG << "io_submit meet error, " << std::endl;;
       printf("io_submit error\n");
       return kIOError;
@@ -153,25 +173,24 @@ struct aio_env {
     return kSucc;
   }
 
-  RetCode WaitOver() {
+  void WaitOver() {
     // after submit, need to wait all read over.
-    while (io_getevents(ctx, kSingleRequest, kSingleRequest,
-                      &(events), &(timeout)) != kSingleRequest) {
+    while (io_getevents(ctx, index, index,
+                        events, &(timeout)) != index) {
       /**/
     }
-    return kSucc;
   }
 
   ~aio_env() {
     io_destroy(ctx);
-    free(buf);
   }
 
+  int fd = -1;
+  int index = 0;
   io_context_t ctx;
-  char *buf = nullptr;
-  struct iocb iocb;
-  struct iocb* iocbs = nullptr;
-  struct io_event events;
+  struct iocb iocb[kMaxIOEvent];
+  struct iocb* iocbs[kMaxIOEvent];
+  struct io_event events[kMaxIOEvent];
   struct timespec timeout;
 };
 
@@ -202,7 +221,7 @@ class Queue {
     void Pop(std::vector<KVItem*> *vs, bool is_write=true) {
         // wait for more write here.
         qlock_.lock();
-        if (q_.size() < kMaxFlushItem && is_write) {
+        if (q_.size() < kMaxThreadNumber && is_write) {
           qlock_.unlock();
           // do something here.
           // is some reader blocked on the request?
@@ -274,12 +293,19 @@ class EngineRace : public Engine  {
  private:
   std::string dir_;
   FileLock* db_lock_;
-  int fd_ = -1;
+  int fd_ = -1; // the big file.
+  struct aio_env write_aio_;
+  struct aio_env read_aio_;
+
   char *write_data_buf_ = nullptr; //  256KB
   char *index_buf_ = nullptr; // 4KB
   char *read_data_buf_ = nullptr; // 4MB
+
+  // control of the write_queue.
   std::atomic<bool> stop_{false};
   Queue<write_item> write_queue_;
+
+  // hash tree table.
   HashTreeTable hash_;
 
   // started from 1GB. add the left 4KB in

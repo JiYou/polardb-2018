@@ -210,6 +210,9 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
       meet_error = true;
       return;
     }
+    // init the aio env
+    engine_race->write_aio_.SetFD(engine_race->fd_);
+    engine_race->read_aio_.SetFD(engine_race->fd_);
   };
   std::thread thd_create_big_file(create_big_file);
 
@@ -277,8 +280,6 @@ void EngineRace::BuildHashTable() {
 
   // to read disk.
   auto read_disk = [this, &q, &read_over_]() {
-    struct aio_env io(false/*use_out_buf*/);
-
     // start from the begin of file.
     uint64_t offset = 0;
     char *buf = nullptr;
@@ -286,9 +287,9 @@ void EngineRace::BuildHashTable() {
     // the index part is maxiumly 1GB.
     for (uint32_t i = 0; i < kMaxIndexSize / k4MB && is_valid; i++) {
       buf = GetAlignedBuffer(k4MB);
-      io.Prepare(fd_, offset, buf);
-      io.Submit();
-      io.WaitOver();
+      read_aio_.PrepareRead(offset, buf, k4MB);
+      read_aio_.Submit();
+      read_aio_.WaitOver();
       q.Push(buf);
       is_valid = buf[kLastCharIn4MB];
       offset += k4MB;
