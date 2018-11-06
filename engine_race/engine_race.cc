@@ -440,14 +440,7 @@ EngineRace::~EngineRace() {
 void EngineRace::WriteEntry() {
   std::vector<write_item*> vs(64, nullptr);
   DEBUG << "db::WriteEntry()" << std::endl;
-
-  // feed back to the caller
-  auto feed_back = [](write_item *x, int code=kSucc) {
-    std::unique_lock<std::mutex> l(x->lock_);
-    x->is_done = true;
-    x->ret_code = kSucc;
-    x->cond_.notify_all();
-  };
+  vs.clear();
 
   // index memory head
   struct disk_index *imh = reinterpret_cast<struct disk_index*>(index_buf_);
@@ -484,12 +477,16 @@ void EngineRace::WriteEntry() {
       }
     }
 
-    uint32_t index_write_size = (di - imh) * sizeof(disk_index);
-    uint32_t data_write_size = (to - vmh) * sizeof(uint64_t);
+    // uint32_t index_write_size = (di - imh) * sizeof(disk_index);
+    // assert (index_write_size == vs.size() * sizeof(struct disk_index));
+    // uint32_t data_write_size = (to - vmh) * sizeof(uint64_t);
+    // assert (kPageSize * vs.size() * sizeof(struct disk_index));
+    uint32_t index_write_size = vs.size()  << 4; // 16
+    uint32_t data_write_size = vs.size() << 12;  // 4KB
 
     write_aio_.Clear();
-    write_aio_.PrepareWrite(max_index_offset_, index_buf_, index_write_size);
-    write_aio_.PrepareWrite(max_data_offset_, write_data_buf_, data_write_size);
+    write_aio_.PrepareWrite(max_index_offset_, index_buf_, index_write_size); // TODO add call back.
+    write_aio_.PrepareWrite(max_data_offset_, write_data_buf_, data_write_size); // TODO : add callback.
     write_aio_.Submit();
 
     // then you can do something here usefull. instead of waiting the disk write over.
@@ -515,19 +512,19 @@ void EngineRace::WriteEntry() {
     BEGIN_POINT(begin_wait_disk_over);
     write_aio_.WaitOver(); // would stuck here.
     END_POINT(end_write_disk_over, begin_wait_disk_over, "write_aio_.WaitOver()");
-    // after write over, send out the feed back.
+
+
     for (auto &x: vs) {
-      feed_back(x, kSucc);
+      x->feed_back();
     }
   }
 }
 
 #ifdef READ_QUEUE
 void EngineRace::ReadEntry() {
-  std::vector<read_item*> to_read(64, nullptr);
-  std::vector<Location> file_pos(64);
+  std::vector<read_item*> to_read(kMaxThreadNumber, nullptr);
+  std::vector<uint64_t> file_pos(kMaxThreadNumber, 0);
   DEBUG << "db::ReadEntry()" << std::endl;
-
   to_read.resize(0);
   file_pos.resize(0);
 
@@ -548,15 +545,6 @@ void EngineRace::start() {
 }
 
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
-  if (key.size() != kMaxKeyLen || value.size() != kMaxValueLen) {
-    // check the key size.
-    static bool have_find_larger_key = false;
-    if (!have_find_larger_key) {
-      DEBUG << "[WARN] have find key size = " << key.size() << ":" << " value size = " << value.size() << std::endl;
-      have_find_larger_key = true;
-    }
-  }
-
   write_item w(&key, &value);
   write_queue_.Push(&w);
 
@@ -567,6 +555,9 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
 }
 
 RetCode EngineRace::Read(const PolarString& key, std::string* value) {
+#ifdef READ_QUEUE
+#else
+#endif
   return kSucc;
 }
 

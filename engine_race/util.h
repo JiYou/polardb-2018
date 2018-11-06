@@ -1,4 +1,5 @@
 // Copyright [2018] Alibaba Cloud All rights reserved
+#undef NDEBUG
 #ifndef ENGINE_SIMPLE_UTIL_H_
 #define ENGINE_SIMPLE_UTIL_H_
 
@@ -23,10 +24,10 @@
 #include <map>
 
 // Is use read queue?
-// #define READ_QUEUE 0
+#define READ_QUEUE 0
 
 // perf counter.
-#define PERF_COUNT 1
+//#define PERF_COUNT 1
 
 #ifdef PERF_COUNT
   #define BEGIN_POINT(x)  auto x = std::chrono::system_clock::now()
@@ -65,41 +66,39 @@ constexpr int kMaxIOEvent = 64;
 // is key/value disk_item type.
 constexpr uint32_t kValidType = 1;
 
-struct write_item {
-  const PolarString *key = nullptr;
-  const PolarString *value = nullptr;
-
+struct wait_item {
   RetCode ret_code = kSucc;
   bool is_done = false;
   std::mutex lock_;
   std::condition_variable cond_;
 
-  write_item(const PolarString *pkey, const PolarString *pvalue) :
-    key(pkey), value(pvalue) {
-  }
-
   void wait_done() {
     std::unique_lock<std::mutex> l(lock_);
     cond_.wait(l, [&] { return is_done; } );
+  }
+
+  void feed_back() {
+    std::unique_lock<std::mutex> l(lock_);
+    is_done = true;
+    ret_code = kSucc;
+    cond_.notify_one(); // just one wait there.
   }
 };
 
-struct read_item {
+struct write_item : wait_item {
+  const PolarString *key = nullptr;
+  const PolarString *value = nullptr;
+  write_item(const PolarString *pkey, const PolarString *pvalue) :
+    key(pkey), value(pvalue) {
+  }
+};
+
+struct read_item : public wait_item {
   const PolarString *key = nullptr;
   std::string *value = nullptr;
 
-  RetCode ret_code = kSucc;
-  bool is_done = false;
-  std::mutex lock_;
-  std::condition_variable cond_;
-
   read_item(const PolarString *pkey, std::string *pvalue) :
     key(pkey), value(pvalue) {
-  }
-
-  void wait_done() {
-    std::unique_lock<std::mutex> l(lock_);
-    cond_.wait(l, [&] { return is_done; } );
   }
 };
 

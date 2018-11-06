@@ -132,7 +132,7 @@ struct aio_env {
     }
 
     timeout.tv_sec = 0;
-    timeout.tv_nsec = 0;
+    timeout.tv_nsec = 1;
 
     memset(&iocb, 0, sizeof(iocb));
     for (int i = 0; i < kMaxIOEvent; i++) {
@@ -146,22 +146,24 @@ struct aio_env {
     }
   }
 
-  void PrepareRead(uint64_t offset, char *out, uint32_t size) {
+  void PrepareRead(uint64_t offset, char *out, uint32_t size, wait_item *item=nullptr) {
     // prepare the io
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
     iocb[index].u.c.nbytes = size;
     iocb[index].aio_lio_opcode = IO_CMD_PREAD;
+    iocb[index].data = item;
     index++;
   }
 
-  void PrepareWrite(uint64_t offset, char *out, uint32_t size) {
+  void PrepareWrite(uint64_t offset, char *out, uint32_t size, wait_item *item=nullptr) {
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
     iocb[index].u.c.nbytes = size;
     iocb[index].aio_lio_opcode = IO_CMD_PWRITE;
+    iocb[index].data = item;
     index++;
   }
 
@@ -179,10 +181,18 @@ struct aio_env {
   }
 
   void WaitOver() {
-    // after submit, need to wait all read over.
-    while (io_getevents(ctx, index, index,
-                        events, &(timeout)) != index) {
-      /**/
+    int write_over_cnt = 0;
+    while (write_over_cnt != index) {
+      constexpr int min_number = 1;
+      int num_events = io_getevents(ctx, min_number, index, events, &timeout);
+      for (int i = 0; i < num_events; i++) {
+        wait_item *feed_back = reinterpret_cast<wait_item*>(events[i].data);
+        if (feed_back) {
+          feed_back->feed_back();
+        }
+      }
+      // need to call for (i = 0; i < num_events; i++) events[i].call_back();
+      write_over_cnt += num_events;
     }
   }
 
