@@ -4,6 +4,7 @@
 #include "engine_race.h"
 #include "libaio.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -40,7 +41,7 @@ void HashTreeTable::UnlockHashShard(uint32_t index) {
   spin_unlock(hash_lock_[index]);
 }
 
-RetCode HashTreeTable::find(std::vector<kv_info> &vs, 
+RetCode HashTreeTable::find(std::vector<kv_info> &vs,
                             bool sorted,
                             uint64_t key,
                             kv_info **ptr) {
@@ -86,7 +87,7 @@ RetCode HashTreeTable::Get(const char* key, uint64_t *l) {
   }
   pos = ptr->offset_4k_;
   UnlockHashShard(array_pos);
-  
+
   // just get the offset in the big file.
   *l = pos;
   *l <<= kValueLengthBits;
@@ -244,6 +245,12 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
     if (!(engine_race->index_buf_)) {
       meet_error = true;
       return;
+    }
+    // set all the items in index_buf to valid.
+    // then no need to set the value in write process.
+    struct disk_index *di = reinterpret_cast<struct disk_index*>(engine_race->index_buf_);
+    for (uint32_t i = 0; i < kPageSize / sizeof(struct disk_index); i++) {
+      di[i].valid = 1;
     }
     engine_race->write_data_buf_ = GetAlignedBuffer(kPageSize * kMaxThreadNumber + 2 * kPageSize);
     if (!(engine_race->write_data_buf_)) {
@@ -442,8 +449,15 @@ void EngineRace::WriteEntry() {
     x->cond_.notify_all();
   };
 
+  // index memory head
+  struct disk_index *imh = reinterpret_cast<struct disk_index*>(index_buf_);
+  // value memory head
+  uint64_t *vmh = reinterpret_cast<uint64_t*>(write_data_buf_);
+
   while (!stop_) {
     write_queue_.Pop(&vs);
+    struct disk_index *di = imh;
+    uint64_t *to = vmh;
     // firstly, write all the content into file.
     // write all the data.
     for (auto &x: vs) {
@@ -452,10 +466,56 @@ void EngineRace::WriteEntry() {
       // step 1. use aio to trigger write of index & value.
       //         NOTE: need to prepare the aligned memory.
       // step 2. feed_back.
-      // TODO: update struct io_ev to support multiple events.
-      std::cout << x->is_done << std::endl;
+
+      // write_data_buf contains 256KB.
+      char *key_buf = const_cast<char*>(x->key->ToString().c_str());
+      uint64_t *key = reinterpret_cast<uint64_t*>(key_buf);
+      di->SetKey(key);
+      di->offset_4k_ = max_data_offset_ >> kValueLengthBits;
+      assert (di->valid);
+      di++;
+      // di->valid = kValidType; // this has been set in the init function.
+
+      char *value = const_cast<char*>(x->value->ToString().c_str());
+      // copy to the aligned buffer.
+      uint64_t *from = reinterpret_cast<uint64_t*>(value);
+      for (uint32_t i = 0; i < kPageSize / sizeof(uint64_t); i++) {
+        *to++ = *from++;
+      }
     }
 
+    uint32_t index_write_size = (di - imh) * sizeof(disk_index);
+    uint32_t data_write_size = (to - vmh) * sizeof(uint64_t);
+
+    write_aio_.Clear();
+    write_aio_.PrepareWrite(max_index_offset_, index_buf_, index_write_size);
+    write_aio_.PrepareWrite(max_data_offset_, write_data_buf_, data_write_size);
+    write_aio_.Submit();
+
+    // then you can do something here usefull. instead of waiting the disk write over.
+    // ==================
+    // BEGIN of co-task
+
+    // update the hash table at the same time.
+    uint64_t old_pos = max_data_offset_;
+    for (auto &x: vs) {
+      // begin to insert all the items into HashTable.
+      // may sort here, because the write may take some time.
+      hash_.Set(x->key->ToString().c_str(), old_pos);
+      old_pos += kPageSize;
+    }
+    // update the write pos for index and data.
+    max_index_offset_ += index_write_size;
+    max_data_offset_ += data_write_size;
+
+    assert (old_pos == max_data_offset_);
+    // ==================
+    // END of co-task
+
+    BEGIN_POINT(begin_wait_disk_over);
+    write_aio_.WaitOver(); // would stuck here.
+    END_POINT(end_write_disk_over, begin_wait_disk_over, "write_aio_.WaitOver()");
+    // after write over, send out the feed back.
     for (auto &x: vs) {
       feed_back(x, kSucc);
     }

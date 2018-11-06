@@ -31,6 +31,10 @@ struct disk_index {
   char key[kMaxKeyLen];      // 8 byte
   uint32_t offset_4k_;       // 4 byte
   uint32_t valid;            // 4 byte
+  void SetKey(uint64_t *k) {  
+    uint64_t *a = reinterpret_cast<uint64_t*>(key);
+    *a = *k;
+  }
 };
 #pragma pack(pop)
 

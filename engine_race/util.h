@@ -26,14 +26,14 @@
 // #define READ_QUEUE 0
 
 // perf counter.
-//#define PERF_COUNT 0 
+#define PERF_COUNT 1
 
 #ifdef PERF_COUNT
   #define BEGIN_POINT(x)  auto x = std::chrono::system_clock::now()
   #define END_POINT(y,x, msg)  do {                                                                       \
     auto y = std::chrono::system_clock::now();                                                            \
-    auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(data_end_time - data_start_time);    \
-    std::cout << msg << diff.count() / kNanoToMS << " (ms)" << std::endl;                                 \
+    auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(y - x);                              \
+    std::cout << msg << " " << diff.count() / kNanoToMS << " (ms)" << std::endl;                          \
   } while (0)
 #else
   #define BEGIN_POINT(x)
@@ -61,6 +61,9 @@ constexpr int kValueLengthBits = 12;  // stands for 4K
 constexpr size_t kMaxQueueSize = 128; // 4K * 4Kitem ~= 16MB
 constexpr int kMaxThreadNumber = 64; // max number of thread.
 constexpr int kMaxIOEvent = 64;
+
+// is key/value disk_item type.
+constexpr uint32_t kValidType = 1;
 
 struct write_item {
   const PolarString *key = nullptr;
