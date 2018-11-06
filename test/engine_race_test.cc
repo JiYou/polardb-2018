@@ -21,6 +21,10 @@ int main() {
   RetCode ret = Engine::Open(kEnginePath, &engine);
   assert (ret == kSucc);
 
+  char buf[4096];
+  memset(buf, 'b', 4096);
+  ret = engine->Write("aaaaaaaa", buf);
+
   std::string value;
   ret = engine->Read("xxxxxxxyyy", &value);
   printf("[WARN]: TEST_NOT_FOUND [PASS] can not find the item. ret = %d\n", ret);

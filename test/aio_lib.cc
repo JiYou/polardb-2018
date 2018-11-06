@@ -27,7 +27,7 @@
 namespace polar_race {
 // begin of namespace polar_race
 
-const char *file_name = "/tmp/test_engine/DB";
+const char *file_name = "DATA_0";
 
 struct aio_env {
 
@@ -46,6 +46,7 @@ struct aio_env {
     timeout.tv_nsec = 0;
 
     memset(&iocb, 0, sizeof(iocb));
+    iocbs = (struct iocb**) malloc(sizeof(struct iocb*) * kMaxIOEvent);
     for (int i = 0; i < kMaxIOEvent; i++) {
       iocbs[i] = iocb + i;
       iocb[i].aio_lio_opcode = IO_CMD_PREAD;
@@ -90,10 +91,18 @@ struct aio_env {
   }
 
   void WaitOver() {
-    // after submit, need to wait all read over.
-    while (io_getevents(ctx, index, index,
-                        events, &(timeout)) != index) {
-      /**/
+    int write_over_cnt = 0;
+    while (write_over_cnt != index) {
+      constexpr int min_number = 1;
+      int num_events = io_getevents(ctx, min_number, index, events, &timeout);
+      for (int i = 0; i < num_events; i++) {
+        wait_item *feed_back = reinterpret_cast<wait_item*>(events[i].data);
+        if (feed_back) {
+          feed_back->feed_back();
+        }
+      }
+      // need to call for (i = 0; i < num_events; i++) events[i].call_back();
+      write_over_cnt += num_events;
     }
   }
 
@@ -105,7 +114,8 @@ struct aio_env {
   int index = 0;
   io_context_t ctx;
   struct iocb iocb[kMaxIOEvent];
-  struct iocb* iocbs[kMaxIOEvent];
+  // struct iocb* iocbs[kMaxIOEvent];
+  struct iocb** iocbs = nullptr;
   struct io_event events[kMaxIOEvent];
   struct timespec timeout;
 };
@@ -126,6 +136,18 @@ int main(void) {
   }
 
   ev.SetFD(fd);
+
+  auto single_write = [&]() {
+    for (int i = 0; i < 4096; i++) {
+      buf[i] = 'X';
+    }
+    ev.Clear();
+    ev.PrepareWrite(0, buf, 4096);
+    ev.Submit();
+    ev.WaitOver();
+  };
+  single_write();
+
   auto read_test = [&](uint64_t offset, uint64_t size) {
     ev.PrepareRead(offset, buf, size);
     ev.Submit();
@@ -147,7 +169,6 @@ int main(void) {
   }
 
   read_test(1024, 1024);
-
 
   // read 1KB, 1KB, 2KB into buf.
   auto two_read_request = [&]() {

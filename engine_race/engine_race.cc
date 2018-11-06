@@ -199,28 +199,25 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
     return kIOError;
   }
 
+  bool new_create = false;
   // use truncate to create the big file.
-  auto create_big_file = [&engine_race, &meet_error, &name, &file_name]() {
-    int fd = open(file_name, O_CREAT | O_RDWR, S_IWRITE | S_IREAD);
-    if (fd < 0) {
-      DEBUG << "open big file failed!\n";
-      meet_error = true;
-      return;
-    }
-    // this would not change the file content.
-    if (ftruncate(fd, kBigFileSize) < 0) {
-      DEBUG << "create big file failed\n";
-      meet_error = true;
-      return;
-    }
-    close(fd);
-    // then try go open the file with O_DIRECT fd.
-    // O_RDWR | O_DIRECT
+  auto create_big_file = [&engine_race, &meet_error, &name, &file_name, &new_create]() {
     engine_race->fd_ = open(file_name, O_RDWR | O_DIRECT, 0644);
-    if (engine_race->fd_ < 0) {
-      DEBUG << "open big file failed\n";
-      meet_error = true;
-      return;
+
+    // if not exists. then create it.
+    if (engine_race->fd_ < 0 && errno == ENOENT) {
+      engine_race->fd_ = open(file_name, O_RDWR | O_CREAT | O_DIRECT, 0644);
+      if (engine_race->fd_ < 0) {
+        DEBUG << "create big file failed!\n";
+        meet_error = true;
+        return;
+      }
+      // if open success.
+      if (posix_fallocate(engine_race->fd_, 0, kBigFileSize)) {
+        DEBUG << "posix_fallocate failed\n";
+        meet_error = true;
+        return;
+      }
     }
     // init the aio env
     engine_race->write_aio_.SetFD(engine_race->fd_);
@@ -239,7 +236,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   // setup write buffer.
   // 4KB for index
   // 256KB for write data
-  // 4MB for read data.
   auto alloc_buf = [&engine_race, &meet_error] () {
     engine_race->index_buf_ = GetAlignedBuffer(kPageSize);
     if (!(engine_race->index_buf_)) {
@@ -334,7 +330,7 @@ void EngineRace::BuildHashTable() {
 
   max_data_offset_ = kMaxIndexSize;
   max_index_offset_ = 0;
-  bool has_find_valid = true;
+  bool has_find_valid = false;
   auto buf_to_hash = [&](char *buf) {
     // deal with the buffer.
     if (buf) {
@@ -407,6 +403,9 @@ void EngineRace::BuildHashTable() {
     max_data_offset_ += kPageSize;
     max_index_offset_ += sizeof(struct disk_index);
   }
+
+  std::cout << "index pos: " << max_index_offset_ << std::endl;
+  std::cout << "data pos - 1GB:  " << max_data_offset_ - kMaxIndexSize << std::endl;
 }
 
 EngineRace::~EngineRace() {
@@ -475,6 +474,8 @@ void EngineRace::WriteEntry() {
     uint32_t index_write_size = vs.size()  << 4; // 16
     uint32_t data_write_size = vs.size() << 12;  // 4KB
 
+    std::cout << "index pos: " << max_index_offset_ << " : " << index_write_size << std::endl;
+    std::cout << "idata pos: " << max_data_offset_ << " : " << data_write_size << std::endl;
     write_aio_.Clear();
     write_aio_.PrepareWrite(max_index_offset_, index_buf_, index_write_size); // TODO add call back.
     write_aio_.PrepareWrite(max_data_offset_, write_data_buf_, data_write_size); // TODO : add callback.
