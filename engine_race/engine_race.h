@@ -168,7 +168,7 @@ struct aio_env {
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
-    iocb[index].u.c.nbytes = size < kPageSize ? kPageSize : size; // FIX TODO
+    iocb[index].u.c.nbytes = size < 512 ? 512: size; // FIX TODO
     iocb[index].aio_lio_opcode = IO_CMD_PWRITE;
     iocb[index].data = item;
     index++;
