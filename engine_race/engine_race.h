@@ -313,9 +313,14 @@ class EngineRace : public Engine  {
   // hash tree table.
   HashTreeTable hash_;
 
-  // started from 1GB. add the left 4KB in
+  // data offset, started from 1GB. add the left 4KB in
   // build hash tree table.!
   uint64_t max_data_offset_ = kMaxIndexSize;
+  // index offset, start from 0 pos.
+  // add the left 16 bytes in
+  // build_hash_tree table.
+  uint64_t max_index_offset_ = 0;
+
 #ifdef READ_QUEUE
   Queue<read_item> read_queue_;
 #endif

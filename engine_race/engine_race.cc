@@ -330,7 +330,9 @@ void EngineRace::BuildHashTable() {
     return buf;
   };
 
-  uint64_t max_data_offset = 0;
+  max_data_offset_ = kMaxIndexSize;
+  max_index_offset_ = 0;
+  bool has_find_valid = true;
   auto buf_to_hash = [&](char *buf) {
     // deal with the buffer.
     if (buf) {
@@ -340,8 +342,11 @@ void EngineRace::BuildHashTable() {
         // puth every index into hash table.
         auto ref = array + i;
         if (ref->valid) {
-          hash_.Set(ref->key, ref->offset_4k_ << kValueLengthBits);
-          max_data_offset = std::max(max_data_offset, ref->offset_4k_ << kValueLengthBits);
+          uint64_t offset = ref->offset_4k_ << kValueLengthBits;
+          hash_.Set(ref->key, offset);
+          max_data_offset_ = std::max(max_data_offset_, offset);
+          max_index_offset_ += sizeof(struct disk_index);
+          has_find_valid = true;
         }
       }
       put_free_buf(buf);
@@ -395,9 +400,11 @@ void EngineRace::BuildHashTable() {
   thd_disk_read.join();
   thd_insert_hash.join();
 
-  // all the index part has read over.
-  // then need to read the data part.
-  
+  // set the next begin to write position.
+  if (has_find_valid) {
+    max_data_offset_ += kPageSize;
+    max_index_offset_ += sizeof(struct disk_index);
+  }
 }
 
 EngineRace::~EngineRace() {
@@ -427,6 +434,7 @@ void EngineRace::WriteEntry() {
   std::vector<write_item*> vs(64, nullptr);
   DEBUG << "db::WriteEntry()" << std::endl;
 
+  // feed back to the caller
   auto feed_back = [](write_item *x, int code=kSucc) {
     std::unique_lock<std::mutex> l(x->lock_);
     x->is_done = true;
@@ -504,7 +512,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
 
 RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
     Visitor &visitor) {
-  return kSucc;  
+  return kSucc;
 }
 
 }  // namespace polar_race
