@@ -9,6 +9,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <stdlib.h>
 
 #include <bitset>
 #include <chrono>
@@ -31,7 +32,7 @@ struct disk_index {
   char key[kMaxKeyLen];      // 8 byte
   uint32_t offset_4k_;       // 4 byte
   uint32_t valid;            // 4 byte
-  void SetKey(uint64_t *k) {  
+  void SetKey(uint64_t *k) {
     uint64_t *a = reinterpret_cast<uint64_t*>(key);
     *a = *k;
   }
@@ -118,6 +119,7 @@ class HashTreeTable {
 // io_.Submit();
 // io_.WaitOver();
 // io_.Clear();
+
 struct aio_env {
 
   void SetFD(int fd_) {
@@ -135,18 +137,20 @@ struct aio_env {
     timeout.tv_nsec = 0;
 
     memset(&iocb, 0, sizeof(iocb));
+    iocbs = (struct iocb**) malloc(sizeof(struct iocb*) * kMaxIOEvent);
     for (int i = 0; i < kMaxIOEvent; i++) {
       iocbs[i] = iocb + i;
-      // iocb[i].aio_lio_opcode = IO_CMD_PREAD;
+      iocb[i].aio_lio_opcode = IO_CMD_PREAD;
       iocb[i].aio_reqprio = 0;
-      // iocb[i].u.c.nbytes = kPageSize;
+      iocb[i].u.c.nbytes = kPageSize;
       // iocb->u.c.offset = offset;
       // iocb->aio_fildes = fd;
       // iocb->u.c.buf = buf;
     }
   }
 
-  void PrepareRead(uint64_t offset, char *out, uint32_t size, wait_item *item=nullptr) {
+  void PrepareRead(uint64_t offset, char *out, uint32_t size, wait_item* item=nullptr) {
+    // prepare the io
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
@@ -157,6 +161,9 @@ struct aio_env {
   }
 
   void PrepareWrite(uint64_t offset, char *out, uint32_t size, wait_item *item=nullptr) {
+    for (int i = 0; i < 20; i++) {
+      std::cout << "data[] = " << out[i] << std::endl;
+    }
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
@@ -181,6 +188,7 @@ struct aio_env {
 
   void WaitOver() {
     int write_over_cnt = 0;
+    std::cout << "index = " << index << std::endl;
     while (write_over_cnt != index) {
       constexpr int min_number = 1;
       int num_events = io_getevents(ctx, min_number, index, events, &timeout);
@@ -203,7 +211,8 @@ struct aio_env {
   int index = 0;
   io_context_t ctx;
   struct iocb iocb[kMaxIOEvent];
-  struct iocb* iocbs[kMaxIOEvent];
+  // struct iocb* iocbs[kMaxIOEvent];
+  struct iocb** iocbs = nullptr;
   struct io_event events[kMaxIOEvent];
   struct timespec timeout;
 };

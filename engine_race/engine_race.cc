@@ -456,6 +456,9 @@ void EngineRace::WriteEntry() {
       di->SetKey(key);
       di->offset_4k_ = max_data_offset_ >> kValueLengthBits;
       assert (di->valid);
+
+      std::cout << "di" << di->key << " , " << di->offset_4k_ << " , " << di->valid << std::endl;
+
       di++;
       // di->valid = kValidType; // this has been set in the init function.
 
@@ -465,6 +468,19 @@ void EngineRace::WriteEntry() {
       for (uint32_t i = 0; i < kPageSize / sizeof(uint64_t); i++) {
         *to++ = *from++;
       }
+    }
+
+    {
+      char *d = reinterpret_cast<char*>(vmh);
+      for (int i = 0; i < 10; i++) {
+        std::cout << "data[] = " << d[i] << std::endl;
+      }
+
+      char *id = reinterpret_cast<char*>(imh);
+      for (int i = 0; i < 10; i++) {
+        std::cout << "idx[] = " << id[i] << std::endl;
+      }
+
     }
 
     // uint32_t index_write_size = (di - imh) * sizeof(disk_index);
