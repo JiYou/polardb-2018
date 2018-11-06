@@ -164,10 +164,11 @@ struct aio_env {
     for (int i = 0; i < 20; i++) {
       std::cout << "data[] = " << out[i] << std::endl;
     }
+    std::cout << "JIYOU = " << size << std::endl;
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
-    iocb[index].u.c.nbytes = size;
+    iocb[index].u.c.nbytes = size < kPageSize ? kPageSize : size; // FIX TODO
     iocb[index].aio_lio_opcode = IO_CMD_PWRITE;
     iocb[index].data = item;
     index++;
