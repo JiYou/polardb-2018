@@ -257,11 +257,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
       meet_error = true;
       return;
     }
-    engine_race->read_data_buf_ = GetAlignedBuffer(k4MB);
-    if (!(engine_race->read_data_buf_)) {
-      meet_error = true;
-      return;
-    }
   };
   std::thread thd_alloc_buf(alloc_buf);
 
@@ -428,10 +423,6 @@ EngineRace::~EngineRace() {
     free(write_data_buf_);
   }
 
-  if (read_data_buf_) {
-    free(read_data_buf_);
-  }
-
   if (-1 != fd_) {
     close(fd_);
   }
@@ -513,7 +504,7 @@ void EngineRace::WriteEntry() {
     write_aio_.WaitOver(); // would stuck here.
     END_POINT(end_write_disk_over, begin_wait_disk_over, "write_aio_.WaitOver()");
 
-
+    // ack all the writers.
     for (auto &x: vs) {
       x->feed_back();
     }
@@ -525,11 +516,15 @@ void EngineRace::ReadEntry() {
   std::vector<read_item*> to_read(kMaxThreadNumber, nullptr);
   std::vector<uint64_t> file_pos(kMaxThreadNumber, 0);
   DEBUG << "db::ReadEntry()" << std::endl;
-  to_read.resize(0);
-  file_pos.resize(0);
 
   while (!stop_) {
     read_queue_.Pop(&to_read);
+    read_aio_.Clear();
+    for (auto &x: to_read) {
+      read_aio_.PrepareRead(x->pos, x->buf, k4MB >> 2, x);
+    }
+    read_aio_.Submit();
+    read_aio_.WaitOver(); // it will call the call back function.
   }
 }
 #endif
@@ -545,6 +540,9 @@ void EngineRace::start() {
 }
 
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
+  // TODO: add write cache hit system ?
+  // if hit the previous value.
+
   write_item w(&key, &value);
   write_queue_.Push(&w);
 
@@ -554,11 +552,72 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   return w.ret_code;
 }
 
+// for 64 read threads, it would take 64MB as cache read.
 RetCode EngineRace::Read(const PolarString& key, std::string* value) {
-#ifdef READ_QUEUE
-#else
-#endif
-  return kSucc;
+  // compute the position.
+  // just give pos,buf to read queue.
+  struct local_buf {
+    char *buf = nullptr;
+    local_buf() {
+      buf = GetAlignedBuffer(k4MB / 4); // just 1 MB for every thread as cache.
+    }
+    ~local_buf() {
+      free(buf);
+    }
+  };
+
+  static thread_local struct local_buf lb;
+  // cache strategy. Just cache the found items.
+  // all the not found item
+  // need to search in the hash.
+  // TODO: design a bloom filter?
+  static thread_local bool has_read = false;
+  static thread_local uint64_t pre_pos = 0;
+  static thread_local uint64_t pre_key = 0;
+
+  value->resize(kPageSize);
+  // opt 1. hit the pre-key?
+  //       . no need to compute the position with hash.
+  const uint64_t *new_key = reinterpret_cast<const uint64_t*>(key.ToString().c_str());
+  if (has_read && pre_key == *new_key) {
+    // just copy the buffer.
+    char *tob = const_cast<char*>(value->c_str());
+    char *fob = lb.buf;
+    engine_memcpy(tob, fob);
+    return kSucc;
+  }
+
+  // opt 2. hit the nearby position.
+  //        compute the position.
+  uint64_t offset = 0;
+  RetCode ret = hash_.Get(key.ToString().c_str(), &offset);
+  if (ret == kNotFound) {
+    return ret;
+  }
+  // find the position. check in the cache?
+  bool is_hit = has_read && offset > pre_pos;
+  constexpr uint64_t max_cache_item = 256; // k4MB / 4 / kPageSize;
+  // NOTE: all the offset is unsigned, so carefull of use minus.
+  if (is_hit && (offset - pre_pos) < max_cache_item) {
+    char *from_buf = lb.buf + (offset - pre_pos);
+    char *tob = const_cast<char*>(value->c_str());
+    engine_memcpy(tob, from_buf);
+    return kSucc;
+  }
+
+  // opt 3. need to read from the disk.
+  // NOTE: update the cache.
+  // udpate the cache.
+  pre_pos = offset;
+  pre_key = *new_key;
+  has_read = true;
+
+  read_item r(offset, const_cast<char*>(value->c_str()));
+  read_queue_.Push(&r);
+
+  std::unique_lock<std::mutex> l(r.lock_);
+  r.cond_.wait(l, [&r] { return r.is_done; });
+  return r.ret_code;
 }
 
 RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,

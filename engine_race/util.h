@@ -43,6 +43,17 @@
 
 #define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"()"<<"msg="<<strerror(errno)
 
+// dst must be: char *
+// src must be: const char *
+#define engine_memcpy(dst,src) do {                                                                         \
+  const uint64_t *from = reinterpret_cast<const uint64_t*>(src);                                            \
+  uint64_t *to = reinterpret_cast<uint64_t*>(dst);                                                          \
+  for (uint32_t i = 0; i < kPageSize / sizeof(uint64_t); i++) {                                             \
+    *to++ = *from++;                                                                                        \
+  }                                                                                                         \
+} while (0)
+
+
 namespace polar_race {
 
 constexpr int64_t kNanoToMS = 1000000;
@@ -94,12 +105,9 @@ struct write_item : wait_item {
 };
 
 struct read_item : public wait_item {
-  const PolarString *key = nullptr;
-  std::string *value = nullptr;
-
-  read_item(const PolarString *pkey, std::string *pvalue) :
-    key(pkey), value(pvalue) {
-  }
+  uint64_t pos;
+  char *buf;
+  read_item(uint64_t p, char *b): pos(p), buf(b) { }
 };
 
 void ComputeMeanSteDev(const std::vector<size_t> &vs, double *mean, double *std);

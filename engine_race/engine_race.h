@@ -132,7 +132,7 @@ struct aio_env {
     }
 
     timeout.tv_sec = 0;
-    timeout.tv_nsec = 1;
+    timeout.tv_nsec = 0;
 
     memset(&iocb, 0, sizeof(iocb));
     for (int i = 0; i < kMaxIOEvent; i++) {
@@ -240,7 +240,7 @@ class Queue {
           qlock_.unlock();
           // do something here.
           // is some reader blocked on the request?
-          std::this_thread::sleep_for(std::chrono::nanoseconds(4));
+          std::this_thread::sleep_for(std::chrono::nanoseconds(1));
         } else {
           qlock_.unlock();
         }
@@ -318,7 +318,7 @@ class EngineRace : public Engine  {
 
   char *write_data_buf_ = nullptr; //  256KB
   char *index_buf_ = nullptr; // 4KB
-  char *read_data_buf_ = nullptr; // 4MB
+  // char *read_data_buf_ = nullptr; // 4MB
 
   // control of the write_queue.
   std::atomic<bool> stop_{false};
