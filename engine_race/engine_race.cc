@@ -345,13 +345,16 @@ void EngineRace::BuildHashTable() {
         auto ref = array + i;
         if (ref->valid) {
           uint64_t offset = ref->offset_4k_ << kValueLengthBits;
+          // JIYOU
+          char *key = reinterpret_cast<char*>(ref->key);
+          std::cout << "JIYOU ";
+          for (int i = 0; i < 8; i++) std::cout << key[i];
+          std::cout << std::endl;
+
           hash_.Set(ref->key, offset);
           max_data_offset_ = std::max(max_data_offset_, offset);
           max_index_offset_ += sizeof(struct disk_index);
           has_find_valid = true;
-        } {
-          read_over = true;
-          break;
         }
       }
       put_free_buf(buf);
@@ -368,8 +371,11 @@ void EngineRace::BuildHashTable() {
       // Here will spend many time to read content from disk.
       auto buf = get_disk_content(index_offset);
       index_offset += k4MB;
-      //read_over = !buf[kLastCharIn4MB];
-
+      // get the last uint32_t
+      uint32_t *ar = reinterpret_cast<uint32_t*>(buf);
+      if (ar[k4MB/4-1] == 0) {
+        read_over = true;
+      }
       // try to put the disk into bufers;
       std::unique_lock<std::mutex> l(lock);
       buffers.push_back(buf);
