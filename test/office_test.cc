@@ -150,7 +150,14 @@ void randomRead(Engine* engine, const threadsafe_vector<std::string>& keys, unsi
     for (unsigned i = 0; i < numRead; ++i) {
         auto& key = keys[rng.nextNum()];
         std::string val;
+        std::cout << " i = " << i << std::endl;
         engine->Read(key, &val);
+
+        std::cout << "val = " << val << std::endl;
+
+        std::cout << "check = " << key_from_value(val) << std::endl;
+        std::cout << "key   = " << key << std::endl;
+
         //if (key != hash_to_str(fnv1_hash_64(val)) {
         if (key != key_from_value(val)) {
             std::cout << "Random Read error: key and value not match" << std::endl;

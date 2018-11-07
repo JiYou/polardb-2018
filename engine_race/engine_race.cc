@@ -530,8 +530,16 @@ void EngineRace::WriteEntry() {
     // disk to write: [disk_align_1k, size=align_1kb)
 
     uint32_t data_write_size = vs.size() << 12;
-    DEBUG << "index pos: " << max_index_offset_ << " : " <<  align_up_1kb << std::endl;
-    DEBUG << "idata pos: " << max_data_offset_ - kMaxIndexSize << " : " << data_write_size << std::endl;
+
+    { // debug info
+      DEBUG << "--------\n";
+      for (struct disk_index *d = imh; d < (imh + (align_up_1kb>>4)); d++) {
+        uint64_t k = *((uint64_t*)(d->key));
+        DEBUG << "key:" << k << "," << d->offset_4k_ << std::endl;
+      }
+    }
+    // DEBUG << "index pos: " << max_index_offset_ << " : " <<  align_up_1kb << std::endl;
+    // DEBUG << "idata pos: " << max_data_offset_ - kMaxIndexSize << " : " << data_write_size << std::endl;
     write_aio_.Clear();
     write_aio_.PrepareWrite(disk_align_1k, index_buf_, align_up_1kb);
     write_aio_.PrepareWrite(max_data_offset_, write_data_buf_, data_write_size);
@@ -569,28 +577,28 @@ void EngineRace::WriteEntry() {
     // so, index_buf need to align to new_align
 
     uint64_t new_align = ROUND_DOWN_1KB(max_index_offset_);
-    if (new_align != disk_align_1k) {
+    // index_buf_ need to walk-front to_walk bytes.
+    uint64_t to_walk = new_align - disk_align_1k;
+    if (to_walk) {
       // just need to copy the length: max_index_offset_ - new_align
       uint32_t move_mem_size = max_index_offset_ - new_align;
 
-      char *from = index_buf_ + (new_align - disk_align_1k);
+      char *from = index_buf_ + to_walk;
       char *to = index_buf_;
       for (uint32_t i = 0; i < move_mem_size; i++) {
         *to++ = *from++;
       }
-      mem_tail = ctail - (new_align - disk_align_1k);
+      mem_tail = ctail - to_walk;
+      disk_align_1k = new_align;
     } else {
       mem_tail = ctail;
     }
-    disk_align_1k = new_align;
 
-    assert (mem_tail < (k4MB / 1024));
     // ==================
     // END of co-task
 
     BEGIN_POINT(begin_wait_disk_over);
     write_aio_.WaitOver(); // would stuck here.
-    DEBUG << "wait over" << std::endl;
     END_POINT(end_write_disk_over, begin_wait_disk_over, "write_aio_.WaitOver()");
 
     // ack all the writers.
@@ -649,6 +657,8 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     char *buf = nullptr;
     local_buf() {
       buf = GetAlignedBuffer(k4MB / 4); // just 1 MB for every thread as cache.
+      // JIYOU
+      for (int i = 0; i < k4MB / 4; i++) buf[i] = 'A';
     }
     ~local_buf() {
       free(buf);
@@ -701,11 +711,20 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   pre_key = *new_key;
   has_read = true;
 
+  std::cout << "JIYOU key -> " << *new_key << std::endl;
+  std::cout << "JIYOU read-> " << offset << std::endl;
+
   read_item r(offset, const_cast<char*>(value->c_str()));
   read_queue_.Push(&r);
 
   std::unique_lock<std::mutex> l(r.lock_);
   r.cond_.wait(l, [&r] { return r.is_done; });
+
+  // JIYOU
+  for (int i = 0; i < kPageSize; i++) {
+    std::cout << lb.buf[i];
+  }
+  std::cout << std::endl;
   return r.ret_code;
 }
 

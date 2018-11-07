@@ -140,9 +140,9 @@ struct aio_env {
     iocbs = (struct iocb**) malloc(sizeof(struct iocb*) * kMaxIOEvent);
     for (int i = 0; i < kMaxIOEvent; i++) {
       iocbs[i] = iocb + i;
-      iocb[i].aio_lio_opcode = IO_CMD_PREAD;
+      //iocb[i].aio_lio_opcode = IO_CMD_PREAD;
       iocb[i].aio_reqprio = 0;
-      iocb[i].u.c.nbytes = kPageSize;
+      // iocb[i].u.c.nbytes = kPageSize;
       // iocb->u.c.offset = offset;
       // iocb->aio_fildes = fd;
       // iocb->u.c.buf = buf;
@@ -164,7 +164,7 @@ struct aio_env {
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
-    iocb[index].u.c.nbytes = size < 512 ? 512: size; // FIX TODO
+    iocb[index].u.c.nbytes = size;
     iocb[index].aio_lio_opcode = IO_CMD_PWRITE;
     iocb[index].data = item;
     index++;
