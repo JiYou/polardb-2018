@@ -161,10 +161,6 @@ struct aio_env {
   }
 
   void PrepareWrite(uint64_t offset, char *out, uint32_t size, wait_item *item=nullptr) {
-    for (int i = 0; i < 20; i++) {
-      std::cout << "data[] = " << out[i] << std::endl;
-    }
-    std::cout << "JIYOU = " << size << std::endl;
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
@@ -189,7 +185,6 @@ struct aio_env {
 
   void WaitOver() {
     int write_over_cnt = 0;
-    std::cout << "index = " << index << std::endl;
     while (write_over_cnt != index) {
       constexpr int min_number = 1;
       int num_events = io_getevents(ctx, min_number, index, events, &timeout);

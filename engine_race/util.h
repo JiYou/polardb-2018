@@ -41,7 +41,7 @@
   #define END_POINT(y,x, msg)
 #endif
 
-#define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"()"<<"msg="<<strerror(errno)
+#define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"(): "<<" [" <<strerror(errno) << "] "
 
 // dst must be: char *
 // src must be: const char *
@@ -53,6 +53,8 @@
   }                                                                                                         \
 } while (0)
 
+#define ROUND_UP_1KB(x) (((x) + 1023) & (~1023))
+#define ROUND_DOWN_1KB(x) ((x) & (~1023))
 
 namespace polar_race {
 
@@ -63,6 +65,7 @@ constexpr size_t kMaxBucketSize = 17 * 19 * 23 * 29 * 31 + 1;
 constexpr int kSingleRequest = 1;
 constexpr int kMinNumber = 1;
 constexpr int kPageSize = 4096;
+constexpr uint32_t k1KB = kPageSize >> 2;
 constexpr uint32_t kReadValueCnt = 1024;
 constexpr uint32_t k4MB = kPageSize * 1024;
 constexpr uint32_t kMaxIndexSize = 1024 * 1024 * 1024; // 1GB

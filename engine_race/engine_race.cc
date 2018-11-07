@@ -164,7 +164,7 @@ void HashTreeTable::PrintMeanStdDev() {
   }
   double mean = 0, stdev = 0;
   ComputeMeanSteDev(vs, &mean, &stdev);
-  std::cout << "HashHard Stat: mean = " << mean
+  DEBUG << "HashHard Stat: mean = " << mean
             << " , " << "stdev = " << stdev << std::endl;
 }
 
@@ -241,12 +241,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
     if (!(engine_race->index_buf_)) {
       meet_error = true;
       return;
-    }
-    // set all the items in index_buf to valid.
-    // then no need to set the value in write process.
-    struct disk_index *di = reinterpret_cast<struct disk_index*>(engine_race->index_buf_);
-    for (uint32_t i = 0; i < kPageSize / sizeof(struct disk_index); i++) {
-      di[i].valid = 1;
     }
     engine_race->write_data_buf_ = GetAlignedBuffer(kPageSize * kMaxThreadNumber + 2 * kPageSize);
     if (!(engine_race->write_data_buf_)) {
@@ -404,8 +398,8 @@ void EngineRace::BuildHashTable() {
     max_index_offset_ += sizeof(struct disk_index);
   }
 
-  std::cout << "index pos: " << max_index_offset_ << std::endl;
-  std::cout << "data pos - 1GB:  " << max_data_offset_ - kMaxIndexSize << std::endl;
+  DEBUG << "index pos: " << max_index_offset_ << std::endl;
+  DEBUG << "data pos - 1GB:  " << max_data_offset_ - kMaxIndexSize << std::endl;
 }
 
 EngineRace::~EngineRace() {
@@ -432,35 +426,60 @@ void EngineRace::WriteEntry() {
   DEBUG << "db::WriteEntry()" << std::endl;
   vs.clear();
 
-  // index memory head
+  // the position aligned with 1KB in disk.
+  //
+  //      delta = less than 1KB
+  // |***********************......................|
+  // disk_align_1k          |
+  //                    max_index_offset_
+  //
+
+  // mem_tail is where start to append the disk_index.
+  // NOTE: is not the start point of buffer to write to disk.
+  uint64_t disk_align_1k = ROUND_DOWN_1KB(max_index_offset_);
+  uint64_t mem_tail = 0;
+  uint64_t delta = max_index_offset_ - disk_align_1k;
+  if (delta) {
+    read_aio_.Clear();
+    read_aio_.PrepareRead(disk_align_1k, index_buf_, ROUND_UP_1KB(delta));
+    read_aio_.Submit();
+    read_aio_.WaitOver();
+    mem_tail += delta;
+  }
+
+  // at this point.
+  // the position aligned with 1KB in disk.
+  //index_buf              mem_tail
+  // |   delta              |
+  // |======================|......................|
+  //      delta < 1KB
+  // |***********************......................|
+  // disk_align_1k          |
+  //                    max_index_offset_
+  //
+
+  // head of disk index in memory
   struct disk_index *imh = reinterpret_cast<struct disk_index*>(index_buf_);
   // value memory head
   uint64_t *vmh = reinterpret_cast<uint64_t*>(write_data_buf_);
 
   while (!stop_) {
     write_queue_.Pop(&vs);
-    struct disk_index *di = imh;
-    uint64_t *to = vmh;
-    // firstly, write all the content into file.
-    // write all the data.
-    for (auto &x: vs) {
-      // write the item into disk.
-      // deal with each request.
-      // step 1. use aio to trigger write of index & value.
-      //         NOTE: need to prepare the aligned memory.
-      // step 2. feed_back.
 
+    // move to mem_tail
+    struct disk_index *di = imh + (mem_tail >> 4);
+    // data part just use the head every time.
+    uint64_t *to = vmh;
+
+    for (uint32_t i = 0; i < vs.size(); i++) {
+      auto &x = vs[i];
       // write_data_buf contains 256KB.
       char *key_buf = const_cast<char*>(x->key->ToString().c_str());
       uint64_t *key = reinterpret_cast<uint64_t*>(key_buf);
       di->SetKey(key);
-      di->offset_4k_ = max_data_offset_ >> kValueLengthBits;
-      assert (di->valid);
-
-      std::cout << "di" << di->key << " , " << di->offset_4k_ << " , " << di->valid << std::endl;
-
+      di->offset_4k_ = (max_data_offset_ >> kValueLengthBits)+ i; // unit is 4KB
+      di->valid = kValidType; // this has been set in the init function.
       di++;
-      // di->valid = kValidType; // this has been set in the init function.
 
       char *value = const_cast<char*>(x->value->ToString().c_str());
       // copy to the aligned buffer.
@@ -470,31 +489,49 @@ void EngineRace::WriteEntry() {
       }
     }
 
+    // at this point.
+    // the position aligned with 1KB in disk.
+    //index_buf              mem_tail     ctail
+    // |   delta              |            |       |<- align_1kb
+    // |======================|++++++++++++........|.......
+    //      delta = less than 1KB
+    // |***********************......................|
+    // disk_align_1k          |
+    //                    max_index_offset_
+    //
+    // di maybe not aligned with 1KB.
+    // [di, round_up_1kb(di))  set to 0.
+    uint32_t ctail = mem_tail + (vs.size() << 4); // ctail.val
+    // ROUND_UP 1KB
+    uint32_t align_up_1kb = ROUND_UP_1KB(ctail);
+    DEBUG << "ctail = " << ctail << " , " << align_up_1kb << std::endl;
     {
-      char *d = reinterpret_cast<char*>(vmh);
-      for (int i = 0; i < 10; i++) {
-        std::cout << "data[] = " << d[i] << std::endl;
+      uint64_t *b = (uint64_t*)(index_buf_ + ctail);
+      uint64_t *e = (uint64_t*)(index_buf_ + align_up_1kb);
+      while (b < e) {
+        *b++ = 0;
       }
-
-      char *id = reinterpret_cast<char*>(imh);
-      for (int i = 0; i < 10; i++) {
-        std::cout << "idx[] = " << id[i] << std::endl;
-      }
-
     }
 
-    // uint32_t index_write_size = (di - imh) * sizeof(disk_index);
-    // assert (index_write_size == vs.size() * sizeof(struct disk_index));
-    // uint32_t data_write_size = (to - vmh) * sizeof(uint64_t);
-    // assert (kPageSize * vs.size() * sizeof(struct disk_index));
-    uint32_t index_write_size = vs.size()  << 4; // 16
-    uint32_t data_write_size = vs.size() << 12;  // 4KB
+    // at this point.
+    // the position aligned with 1KB in disk.
+    //index_buf              mem_tail     ctail
+    // |   delta              |            |       |<- align_1kb
+    // |======================|++++++++++++00000000|.......
+    //      delta = less than 1KB
+    // |***********************......................|
+    // disk_align_1k          |
+    //                    max_index_offset_
+    //
+    // So: need to write [0, align_1kb)
+    // disk to write: [disk_align_1k, size=align_1kb)
 
-    std::cout << "index pos: " << max_index_offset_ << " : " << index_write_size << std::endl;
-    std::cout << "idata pos: " << max_data_offset_ << " : " << data_write_size << std::endl;
+    uint32_t data_write_size = vs.size() << 12;
+    DEBUG << "index pos: " << max_index_offset_ << " : " <<  align_up_1kb << std::endl;
+    DEBUG << "idata pos: " << max_data_offset_ << " : " << data_write_size << std::endl;
     write_aio_.Clear();
-    write_aio_.PrepareWrite(max_index_offset_, index_buf_, index_write_size); // TODO add call back.
-    write_aio_.PrepareWrite(max_data_offset_, write_data_buf_, data_write_size); // TODO : add callback.
+    write_aio_.PrepareWrite(disk_align_1k, index_buf_, align_up_1kb);
+    write_aio_.PrepareWrite(max_data_offset_, write_data_buf_, data_write_size);
     write_aio_.Submit();
 
     // then you can do something here usefull. instead of waiting the disk write over.
@@ -509,16 +546,54 @@ void EngineRace::WriteEntry() {
       hash_.Set(x->key->ToString().c_str(), old_pos);
       old_pos += kPageSize;
     }
-    // update the write pos for index and data.
-    max_index_offset_ += index_write_size;
-    max_data_offset_ += data_write_size;
 
+    max_index_offset_ += vs.size() << 4;
+    max_data_offset_ += data_write_size;
     assert (old_pos == max_data_offset_);
+
+    // at this point.
+    // the position aligned with 1KB in disk.
+    //index_buf              mem_tail     ctail
+    // |   delta              |            |       |<- align_1kb
+    // |======================|++++++++++++00000000|.......
+    //      delta = less than 1KB
+    // |***********************************......................|
+    // disk_align_1k      |                |
+    //                    |               max_index_offset_
+    //                    |
+    //                 new_align
+    // need to delete new_align - disk_align_1k;
+    // to avoid duplicate memory write to disk
+    // so, index_buf need to align to new_align
+    DEBUG << "JIYOU mem_tail = " << mem_tail << std::endl;
+    assert (mem_tail < (k4MB / 1024));
+    DEBUG << "max_index_offset_ = " << max_index_offset_ << std::endl;
+
+    uint64_t new_align = ROUND_DOWN_1KB(max_index_offset_);
+    if (new_align != disk_align_1k) {
+      // just need to copy the length: max_index_offset_ - new_align
+      uint32_t move_mem_size = max_index_offset_ - new_align;
+
+      char *from = index_buf_ + (new_align - disk_align_1k);
+      char *to = index_buf_;
+      for (uint32_t i = 0; i < move_mem_size; i++) {
+        *to++ = *from++;
+      }
+      DEBUG << "new_align = " << new_align << " , disk_align_1k = " << disk_align_1k << std::endl;
+      DEBUG << "ctail = " << ctail << std::endl;
+      mem_tail = ctail - (new_align - disk_align_1k);
+    } else {
+      mem_tail = ctail;
+    }
+
+    DEBUG << "JIYOU mem_tail = " << mem_tail << std::endl;
+    assert (mem_tail < (k4MB / 1024));
     // ==================
     // END of co-task
 
     BEGIN_POINT(begin_wait_disk_over);
     write_aio_.WaitOver(); // would stuck here.
+    DEBUG << "wait over" << std::endl;
     END_POINT(end_write_disk_over, begin_wait_disk_over, "write_aio_.WaitOver()");
 
     // ack all the writers.
