@@ -645,8 +645,6 @@ void EngineRace::start() {
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   // TODO: add write cache hit system ?
   // if hit the previous value.
-  DEBUG << "Write():" << key.ToString() << " , " << value.ToString() << std::endl;
-
   write_item w(&key, &value);
   write_queue_.Push(&w);
 
@@ -664,8 +662,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     char *buf = nullptr;
     local_buf() {
       buf = GetAlignedBuffer(k4MB / 4); // just 1 MB for every thread as cache.
-      // JIYOU
-      for (int i = 0; i < k4MB / 4; i++) buf[i] = 'A';
     }
     ~local_buf() {
       free(buf);
@@ -727,11 +723,11 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   std::unique_lock<std::mutex> l(r.lock_);
   r.cond_.wait(l, [&r] { return r.is_done; });
 
-  // JIYOU
-  for (int i = 0; i < kPageSize; i++) {
-    std::cout << lb.buf[i];
-  }
-  std::cout << std::endl;
+  // copy the buffer
+  char *new_buf = lb.buf;
+  char *target_buf = const_cast<char*>(value->c_str());
+  engine_memcpy(target_buf, new_buf);
+
   return r.ret_code;
 }
 
