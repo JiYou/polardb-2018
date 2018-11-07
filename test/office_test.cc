@@ -236,7 +236,7 @@ void sequentialRead(Engine* engine, const threadsafe_vector<std::string>& keys)
 
 int main()
 {
-    auto numThreads = std::thread::hardware_concurrency();
+    auto numThreads = 1; //std::thread::hardware_concurrency();
     std::cout << numThreads << std::endl;
     
     Engine *engine = NULL;
