@@ -273,6 +273,9 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   return kSucc;
 }
 
+
+// or just read 800MB from disk?
+// which is faster?
 void EngineRace::BuildHashTable() {
   // the file fd has been open.
 
@@ -288,6 +291,8 @@ void EngineRace::BuildHashTable() {
       free_buffers.pop_back();
     } else {
       buf = GetAlignedBuffer(k4MB);
+      // JIYOU
+      memset(buf, 0, k4MB);
     }
     return buf;
   };
@@ -318,6 +323,7 @@ void EngineRace::BuildHashTable() {
     read_aio_.WaitOver();
 
     // JIYOU
+    std::cout << "disk_content = " <<  std::endl;
     for (int i = 0; i < 8; i++) {
       std::cout << buf[i];
     }
@@ -328,6 +334,7 @@ void EngineRace::BuildHashTable() {
   max_data_offset_ = kMaxIndexSize;
   max_index_offset_ = 0;
   bool has_find_valid = false;
+
   auto buf_to_hash = [&](char *buf) {
     // deal with the buffer.
     if (buf) {
@@ -342,6 +349,9 @@ void EngineRace::BuildHashTable() {
           max_data_offset_ = std::max(max_data_offset_, offset);
           max_index_offset_ += sizeof(struct disk_index);
           has_find_valid = true;
+        } {
+          read_over = true;
+          break;
         }
       }
       put_free_buf(buf);
@@ -358,7 +368,7 @@ void EngineRace::BuildHashTable() {
       // Here will spend many time to read content from disk.
       auto buf = get_disk_content(index_offset);
       index_offset += k4MB;
-      read_over = !buf[kLastCharIn4MB];
+      //read_over = !buf[kLastCharIn4MB];
 
       // try to put the disk into bufers;
       std::unique_lock<std::mutex> l(lock);
@@ -399,6 +409,8 @@ void EngineRace::BuildHashTable() {
   if (has_find_valid) {
     max_data_offset_ += kPageSize;
     max_index_offset_ += sizeof(struct disk_index);
+  } else {
+    DEBUG << "not find valid item" << std::endl;
   }
 
   DEBUG << "max_data_offset_ = " << max_data_offset_ << std::endl;
