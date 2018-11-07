@@ -537,8 +537,11 @@ void EngineRace::WriteEntry() {
     { // debug info
       DEBUG << "--------\n";
       for (struct disk_index *d = imh; d < (imh + (align_up_1kb>>4)); d++) {
-        uint64_t k = *((uint64_t*)(d->key));
-        DEBUG << "key:" << k << "," << d->offset_4k_ << std::endl;
+        char *k = ((char*)(d->key));
+        DEBUG << "key:";
+        for (int i = 0; i < 8; i++) std::cout << d->key[i];
+        std::cout << "," << d->offset_4k_ << std::endl;
+        if (!(d->valid)) break;
       }
     }
     // DEBUG << "index pos: " << max_index_offset_ << " : " <<  align_up_1kb << std::endl;
@@ -642,6 +645,7 @@ void EngineRace::start() {
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   // TODO: add write cache hit system ?
   // if hit the previous value.
+  DEBUG << "Write():" << key.ToString() << " , " << value.ToString() << std::endl;
 
   write_item w(&key, &value);
   write_queue_.Push(&w);
