@@ -443,12 +443,11 @@ void EngineRace::WriteEntry() {
   assert (delta < 1024);
   if (delta) {
     read_aio_.Clear();
-    read_aio_.PrepareRead(disk_align_1k, index_buf_, ROUND_UP_1KB(delta));
+    read_aio_.PrepareRead(disk_align_1k, index_buf_, k1KB /*ROUND_UP_1KB(delta)*/);
     read_aio_.Submit();
     read_aio_.WaitOver();
-    mem_tail += delta;
+    mem_tail = delta;
   }
-
 
   // at this point.
   // the position aligned with 1KB in disk.
@@ -481,12 +480,13 @@ void EngineRace::WriteEntry() {
       uint64_t *key = reinterpret_cast<uint64_t*>(key_buf);
       di->SetKey(key);
       di->offset_4k_ = (max_data_offset_ >> kValueLengthBits) + i; // unit is 4KB
-      DEBUG << "map -> " << (max_data_offset_ >> kValueLengthBits) + i - (kMaxIndexSize >> kValueLengthBits) << std::endl;
-      di->valid = kValidType; // this has been set in the init function.
+      DEBUG << "map -> " << (max_data_offset_ >> kValueLengthBits) + \
+                            i - (kMaxIndexSize >> kValueLengthBits) << std::endl;
+      di->valid = kValidType;
       di++;
 
+      // copy the 4KB value part.
       char *value = const_cast<char*>(x->value->ToString().c_str());
-      // copy to the aligned buffer.
       uint64_t *from = reinterpret_cast<uint64_t*>(value);
       for (uint32_t i = 0; i < kPageSize / sizeof(uint64_t); i++) {
         *to++ = *from++;
@@ -505,7 +505,7 @@ void EngineRace::WriteEntry() {
     //
     // di maybe not aligned with 1KB.
     // [di, round_up_1kb(di))  set to 0.
-    uint32_t ctail = mem_tail + (vs.size() << 4); // ctail.val
+    uint32_t ctail = mem_tail + (vs.size() << 4);
     // ROUND_UP 1KB
     uint32_t align_up_1kb = ROUND_UP_1KB(ctail);
     {
@@ -552,14 +552,13 @@ void EngineRace::WriteEntry() {
 
     max_index_offset_ += vs.size() << 4;
     max_data_offset_ += data_write_size;
-    assert (old_pos == max_data_offset_);
 
     // at this point.
     // the position aligned with 1KB in disk.
     //index_buf              mem_tail     ctail
     // |   delta              |            |       |<- align_1kb
     // |======================|++++++++++++00000000|.......
-    //      delta = less than 1KB
+    //
     // |***********************************......................|
     // disk_align_1k      |                |
     //                    |               max_index_offset_
@@ -583,7 +582,7 @@ void EngineRace::WriteEntry() {
     } else {
       mem_tail = ctail;
     }
-    disk_align_1k = ROUND_DOWN_1KB(max_index_offset_);
+    disk_align_1k = new_align;
 
     assert (mem_tail < (k4MB / 1024));
     // ==================
