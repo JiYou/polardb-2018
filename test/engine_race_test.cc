@@ -21,9 +21,16 @@ int main() {
   RetCode ret = Engine::Open(kEnginePath, &engine);
   assert (ret == kSucc);
 
-  char buf[4096];
-  memset(buf, 'b', 4096);
-  ret = engine->Write("aaaaaaaa", buf);
+  std::string str;
+  for (int i = 0; i < 64; i++) {
+    char buf[4096];
+    memset(buf, i % 26 + 'a', 4096);
+    str = "";
+    for (int j = 0; j < 8; j++) {
+      str[j] += i % 26 + 'a';
+    }
+    ret = engine->Write(str.c_str(), buf);
+  }
 
   std::string value;
   ret = engine->Read("xxxxxxxyyy", &value);
