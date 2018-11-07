@@ -150,6 +150,9 @@ struct aio_env {
   }
 
   void PrepareRead(uint64_t offset, char *out, uint32_t size, wait_item* item=nullptr) {
+    // align with 4 kb
+    assert ((((uint64_t)out) & 4095) == 0);
+    assert ((size & 1023) == 0);
     // prepare the io
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
@@ -161,6 +164,9 @@ struct aio_env {
   }
 
   void PrepareWrite(uint64_t offset, char *out, uint32_t size, wait_item *item=nullptr) {
+    assert ((((uint64_t)out) & 4095) == 0);
+    assert ((size & 1023) == 0);
+
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;

@@ -316,6 +316,8 @@ void EngineRace::BuildHashTable() {
   auto get_disk_content = [&](uint64_t offset) {
     char *buf = get_free_buf();
     read_aio_.Clear();
+    DEBUG << "JIYOU begin to read AA " << std::endl;
+    DEBUG << " addr = " << (((uint64_t)buf) & 4095) << std::endl;
     read_aio_.PrepareRead(offset, buf, k4MB);
     read_aio_.Submit();
     read_aio_.WaitOver();
@@ -443,6 +445,7 @@ void EngineRace::WriteEntry() {
   assert (delta < 1024);
   if (delta) {
     read_aio_.Clear();
+    DEBUG << "JIYOU begin to read BB "<< std::endl;
     read_aio_.PrepareRead(disk_align_1k, index_buf_, k1KB /*ROUND_UP_1KB(delta)*/);
     read_aio_.Submit();
     read_aio_.WaitOver();
@@ -714,7 +717,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   std::cout << "JIYOU key -> " << *new_key << std::endl;
   std::cout << "JIYOU read-> " << offset << std::endl;
 
-  read_item r(offset, const_cast<char*>(value->c_str()));
+  read_item r(offset, lb.buf);
   read_queue_.Push(&r);
 
   std::unique_lock<std::mutex> l(r.lock_);
