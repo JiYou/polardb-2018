@@ -439,6 +439,8 @@ void EngineRace::WriteEntry() {
   uint64_t disk_align_1k = ROUND_DOWN_1KB(max_index_offset_);
   uint64_t mem_tail = 0;
   uint64_t delta = max_index_offset_ - disk_align_1k;
+
+  assert (delta < 1024);
   if (delta) {
     read_aio_.Clear();
     read_aio_.PrepareRead(disk_align_1k, index_buf_, ROUND_UP_1KB(delta));
@@ -446,6 +448,7 @@ void EngineRace::WriteEntry() {
     read_aio_.WaitOver();
     mem_tail += delta;
   }
+
 
   // at this point.
   // the position aligned with 1KB in disk.
@@ -477,7 +480,7 @@ void EngineRace::WriteEntry() {
       char *key_buf = const_cast<char*>(x->key->ToString().c_str());
       uint64_t *key = reinterpret_cast<uint64_t*>(key_buf);
       di->SetKey(key);
-      di->offset_4k_ = (max_data_offset_ >> kValueLengthBits)+ i; // unit is 4KB
+      di->offset_4k_ = (max_data_offset_ >> kValueLengthBits) + i; // unit is 4KB
       di->valid = kValidType; // this has been set in the init function.
       di++;
 
@@ -547,6 +550,7 @@ void EngineRace::WriteEntry() {
       old_pos += kPageSize;
     }
 
+    DEBUG << "old_max_index_offset_ = " << max_index_offset_ << std::endl;
     max_index_offset_ += vs.size() << 4;
     max_data_offset_ += data_write_size;
     assert (old_pos == max_data_offset_);
@@ -565,10 +569,9 @@ void EngineRace::WriteEntry() {
     // need to delete new_align - disk_align_1k;
     // to avoid duplicate memory write to disk
     // so, index_buf need to align to new_align
-    DEBUG << "JIYOU mem_tail = " << mem_tail << std::endl;
-    assert (mem_tail < (k4MB / 1024));
-    DEBUG << "max_index_offset_ = " << max_index_offset_ << std::endl;
 
+    DEBUG << "add_index_size = " << vs.size() * 16 << std::endl;
+    DEBUG << "max_index_offset_ = " << max_index_offset_ << std::endl;
     uint64_t new_align = ROUND_DOWN_1KB(max_index_offset_);
     if (new_align != disk_align_1k) {
       // just need to copy the length: max_index_offset_ - new_align
@@ -585,8 +588,8 @@ void EngineRace::WriteEntry() {
     } else {
       mem_tail = ctail;
     }
+    disk_align_1k = ROUND_DOWN_1KB(max_index_offset_);
 
-    DEBUG << "JIYOU mem_tail = " << mem_tail << std::endl;
     assert (mem_tail < (k4MB / 1024));
     // ==================
     // END of co-task
