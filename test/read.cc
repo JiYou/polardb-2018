@@ -52,6 +52,7 @@ void read_thread(Engine *engine, char begin_char) {
                 if (cnt % 10000 == 0) std::cout << "+";
                 std::string G = F + o;
                 std::string X;
+                std::cout << "to find G = " << G << std::endl;
                 auto ret = engine->Read(G, &X);
                 assert (ret == kSucc);
                 auto cret = memcmp(V, X.c_str(), 4096);

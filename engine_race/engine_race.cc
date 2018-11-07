@@ -137,9 +137,6 @@ void HashTreeTable::Sort() {
 
   auto set_all_sorted = [this]() {
       has_sort_.set();
-      if (!has_sort_.test(0)) {
-        DEBUG << "ERROR: sorted set error." << std::endl;
-      }
   };
   std::thread set_sort_bit(set_all_sorted);
 
@@ -316,11 +313,15 @@ void EngineRace::BuildHashTable() {
   auto get_disk_content = [&](uint64_t offset) {
     char *buf = get_free_buf();
     read_aio_.Clear();
-    DEBUG << "JIYOU begin to read AA " << std::endl;
-    DEBUG << " addr = " << (((uint64_t)buf) & 4095) << std::endl;
     read_aio_.PrepareRead(offset, buf, k4MB);
     read_aio_.Submit();
     read_aio_.WaitOver();
+
+    // JIYOU
+    for (int i = 0; i < 8; i++) {
+      std::cout << buf[i];
+    }
+    std::cout << std::endl;
     return buf;
   };
 
@@ -400,8 +401,8 @@ void EngineRace::BuildHashTable() {
     max_index_offset_ += sizeof(struct disk_index);
   }
 
-  DEBUG << "index pos: " << max_index_offset_ << std::endl;
-  DEBUG << "data pos - 1GB:  " << max_data_offset_ - kMaxIndexSize << std::endl;
+  DEBUG << "max_data_offset_ = " << max_data_offset_ << std::endl;
+  DEBUG << "max_index_offset_ = " << max_index_offset_ << std::endl;
 }
 
 EngineRace::~EngineRace() {
@@ -445,7 +446,6 @@ void EngineRace::WriteEntry() {
   assert (delta < 1024);
   if (delta) {
     read_aio_.Clear();
-    DEBUG << "JIYOU begin to read BB "<< std::endl;
     read_aio_.PrepareRead(disk_align_1k, index_buf_, k1KB /*ROUND_UP_1KB(delta)*/);
     read_aio_.Submit();
     read_aio_.WaitOver();
@@ -483,8 +483,6 @@ void EngineRace::WriteEntry() {
       uint64_t *key = reinterpret_cast<uint64_t*>(key_buf);
       di->SetKey(key);
       di->offset_4k_ = (max_data_offset_ >> kValueLengthBits) + i; // unit is 4KB
-      DEBUG << "map -> " << (max_data_offset_ >> kValueLengthBits) + \
-                            i - (kMaxIndexSize >> kValueLengthBits) << std::endl;
       di->valid = kValidType;
       di++;
 
@@ -534,18 +532,6 @@ void EngineRace::WriteEntry() {
 
     uint32_t data_write_size = vs.size() << 12;
 
-    { // debug info
-      DEBUG << "--------\n";
-      for (struct disk_index *d = imh; d < (imh + (align_up_1kb>>4)); d++) {
-        char *k = ((char*)(d->key));
-        DEBUG << "key:";
-        for (int i = 0; i < 8; i++) std::cout << d->key[i];
-        std::cout << "," << d->offset_4k_ << std::endl;
-        if (!(d->valid)) break;
-      }
-    }
-    // DEBUG << "index pos: " << max_index_offset_ << " : " <<  align_up_1kb << std::endl;
-    // DEBUG << "idata pos: " << max_data_offset_ - kMaxIndexSize << " : " << data_write_size << std::endl;
     write_aio_.Clear();
     write_aio_.PrepareWrite(disk_align_1k, index_buf_, align_up_1kb);
     write_aio_.PrepareWrite(max_data_offset_, write_data_buf_, data_write_size);
@@ -713,9 +699,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   pre_pos = offset;
   pre_key = *new_key;
   has_read = true;
-
-  std::cout << "JIYOU key -> " << *new_key << std::endl;
-  std::cout << "JIYOU read-> " << offset << std::endl;
 
   read_item r(offset, lb.buf);
   read_queue_.Push(&r);
