@@ -277,7 +277,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 // or just read 800MB from disk?
 // which is faster?
 void EngineRace::BuildHashTable() {
-
   // JIYOU -- begin
   {
     int fd = open("/tmp/test_engine/DB", O_RDONLY, 0644);
@@ -285,21 +284,34 @@ void EngineRace::BuildHashTable() {
     struct disk_index di;
     int cnt = 0;
     while (true) {
-      ++cnt;
       di.pos = 0;
       if (read(fd, &di, 16) != 16) {
         break;
       }
       if (di.pos == kIndexSkipType) continue;
       if (di.pos == 0) break;
+      ++cnt;
       hash_.Set(di.key, di.pos);
     }
     std::cout << "read over: cnt = " << cnt << std::endl;
     close(fd);
+
+    max_index_offset_ = cnt * 16;
+
+    // set the next begin to write position.
+    if (cnt) {
+      max_data_offset_ += kPageSize;
+      max_index_offset_ += sizeof(struct disk_index);
+    } else {
+      DEBUG << "not find valid item" << std::endl;
+    }
+  
+    DEBUG << "max_data_offset_ = " << max_data_offset_ << std::endl;
+    DEBUG << "max_index_offset_ = " << max_index_offset_ << std::endl;
+
     return;
   }
   // JIYOU  -- end
-
 
   // pool of free buffers.
   std::mutex free_buffer_lock;
