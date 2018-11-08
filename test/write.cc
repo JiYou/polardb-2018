@@ -43,7 +43,7 @@ void write_thread(Engine *engine, char begin_char) {
               std::string F = E + n;
               for (char o = 'a'; o < 'z'; o++) {
                 cnt ++;
-                if (cnt > kMaxCnt) {
+                if (cnt > 3) {
                   std::unique_lock<std::mutex> l(mu);
                   write_cnt++;
                   cond.notify_all();

@@ -256,11 +256,13 @@ class Queue {
         }
 
         std::unique_lock<std::mutex> lck(qlock_);
-        consume_.wait(lck, [&] {return !q_.empty() ; });
+        consume_.wait(lck, [&] {return !q_.empty(); });
         vs->clear();
+        DEBUG << "Q.size() = " << q_.size() << std::endl;
         // get all the items.
         std::copy(q_.begin(), q_.end(), std::back_inserter((*vs)));
         q_.clear();
+        DEBUG << "Q.size() = " << q_.size() << std::endl;
         produce_.notify_all();
     }
   private:
