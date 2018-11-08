@@ -503,6 +503,7 @@ void EngineRace::WriteEntry() {
     // move to mem_tail
     struct disk_index *di = imh + (mem_tail >> 4);
     // data part just use the head every time.
+    // the value buffer would copy to.
     uint64_t *to = vmh;
 
     for (uint32_t i = 0; i < vs.size(); i++) {
@@ -552,6 +553,7 @@ void EngineRace::WriteEntry() {
       uint64_t *b = (uint64_t*)(index_buf_ + ctail);
       uint64_t *e = (uint64_t*)(index_buf_ + align_up_1kb);
       while (b < e) {
+        *b++ = 0; // set 16 bytes = 0;
         *b++ = 0;
       }
     }
@@ -568,7 +570,6 @@ void EngineRace::WriteEntry() {
     //
     // So: need to write [0, align_1kb)
     // disk to write: [disk_align_1k, size=align_1kb)
-
     uint32_t data_write_size = vs.size() << 12;
 
     write_aio_.Clear();
@@ -614,6 +615,7 @@ void EngineRace::WriteEntry() {
       // just need to copy the length: max_index_offset_ - new_align
       uint32_t move_mem_size = max_index_offset_ - new_align;
 
+      // TODO: change to uint64_t copy
       char *from = index_buf_ + to_walk;
       char *to = index_buf_;
       for (uint32_t i = 0; i < move_mem_size; i++) {
