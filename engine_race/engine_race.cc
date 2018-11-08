@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <deque>
 #include <map>
 #include <numeric>
 #include <chrono>
@@ -291,8 +292,6 @@ void EngineRace::BuildHashTable() {
       free_buffers.pop_back();
     } else {
       buf = GetAlignedBuffer(k4MB);
-      // JIYOU
-      memset(buf, 0, k4MB);
     }
     return buf;
   };
@@ -310,7 +309,7 @@ void EngineRace::BuildHashTable() {
     free_buffers.clear();
   };
 
-  std::vector<char*> buffers;
+  std::deque<char*> buffers;
   std::atomic<bool> read_over{false};
   std::mutex lock;
 
@@ -321,13 +320,6 @@ void EngineRace::BuildHashTable() {
     read_aio_.PrepareRead(offset, buf, k4MB);
     read_aio_.Submit();
     read_aio_.WaitOver();
-
-    // JIYOU
-    std::cout << "disk_content = " <<  std::endl;
-    for (int i = 0; i < 8; i++) {
-      std::cout << buf[i];
-    }
-    std::cout << std::endl;
     return buf;
   };
 
@@ -345,16 +337,12 @@ void EngineRace::BuildHashTable() {
         auto ref = array + i;
         if (ref->valid) {
           uint64_t offset = ref->offset_4k_ << kValueLengthBits;
-          // JIYOU
-          char *key = reinterpret_cast<char*>(ref->key);
-          std::cout << "JIYOU ";
-          for (int i = 0; i < 8; i++) std::cout << key[i];
-          std::cout << std::endl;
-
           hash_.Set(ref->key, offset);
           max_data_offset_ = std::max(max_data_offset_, offset);
           max_index_offset_ += sizeof(struct disk_index);
           has_find_valid = true;
+        } else {
+          break;
         }
       }
       put_free_buf(buf);
@@ -367,14 +355,14 @@ void EngineRace::BuildHashTable() {
   // kv index.
   auto disk_read = [&]() {
     int index_offset = 0;
-    while (!read_over) {
+    while (!read_over && index_offset < kMaxIndexSize) {
       // Here will spend many time to read content from disk.
       auto buf = get_disk_content(index_offset);
       index_offset += k4MB;
       // get the last uint32_t
       uint32_t *ar = reinterpret_cast<uint32_t*>(buf);
       if (ar[k4MB/4-1] == 0) {
-        read_over = true;
+        read_over = true; // do not break, put the last one.
       }
       // try to put the disk into bufers;
       std::unique_lock<std::mutex> l(lock);
@@ -390,8 +378,8 @@ void EngineRace::BuildHashTable() {
       // deal with all the buffer.
       // get the last buffer.
       if (buffers.size() > 0) {
-        buf = buffers.back();
-        buffers.pop_back();
+        buf = buffers.front();
+        buffers.pop_front();
       }
       lock.unlock();
       buf_to_hash(buf);
