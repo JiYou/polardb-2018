@@ -527,7 +527,7 @@ void EngineRace::ReadEntry() {
     for (auto &x: to_read) {
       x->buf[0] = 0;
       assert (x->pos >= kMaxIndexSize);
-      read_aio_.PrepareRead(x->pos, x->buf, k4MB >> 2, x);
+      read_aio_.PrepareRead(x->pos, x->buf, kPageSize, x);
     }
     read_aio_.Submit();
     read_aio_.WaitOver(); // it will call the call back function.
@@ -564,7 +564,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   struct local_buf {
     char *buf = nullptr;
     local_buf() {
-      buf = GetAlignedBuffer(k4MB / 4); // just 1 MB for every thread as cache.
+      buf = GetAlignedBuffer(kPageSize); // just 1 MB for every thread as cache.
     }
     ~local_buf() {
       free(buf);
@@ -577,7 +577,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   // need to search in the hash.
   // TODO: design a bloom filter?
   static thread_local bool has_read = false;
-  static thread_local uint64_t pre_pos = 0;
   static thread_local uint64_t pre_key = 0;
 
   value->resize(kPageSize);
@@ -593,29 +592,15 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     return kSucc;
   }
 
-  // opt 2. hit the nearby position.
   //        compute the position.
   uint64_t offset = 0;
   RetCode ret = hash_.Get(key.ToString().c_str(), &offset);
   if (ret == kNotFound) {
     return ret;
   }
-  // find the position. check in the cache?
-  bool is_hit = has_read && offset > pre_pos;
-  constexpr uint64_t max_cache_item = 256; // k4MB / 4 / kPageSize;
-  // NOTE: all the offset is unsigned, so carefull of use minus.
-  if (is_hit && (offset - pre_pos) < max_cache_item) {
-    char *from_buf = lb.buf + (offset - pre_pos);
-    char *tob = const_cast<char*>(value->c_str());
-    // engine_memcpy(tob, from_buf);
-    memcpy(tob, from_buf, kPageSize);
-    return kSucc;
-  }
 
-  // opt 3. need to read from the disk.
   // NOTE: update the cache.
   // udpate the cache.
-  pre_pos = offset;
   pre_key = *new_key;
   has_read = true;
 
