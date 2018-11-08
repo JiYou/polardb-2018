@@ -194,6 +194,7 @@ struct aio_env {
     while (write_over_cnt != index) {
       constexpr int min_number = 1;
       int num_events = io_getevents(ctx, min_number, index, events, &timeout);
+      assert (num_events >= 0);
       for (int i = 0; i < num_events; i++) {
         wait_item *feed_back = reinterpret_cast<wait_item*>(events[i].data);
         if (feed_back) {

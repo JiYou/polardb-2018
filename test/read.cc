@@ -95,7 +95,7 @@ int main() {
         "abcdefghijklmnopqrstuvwxyz"
         "~`!@#$%^&*()_+=-,./;:<>";
 
-  for (int i = 0; i < kMaxThread; i++) {
+  for (int i = 0; i < 1; i++) {
     auto front_char = alphanum[i];
     std::thread thd(read_thread, engine, front_char);
     thd.detach();

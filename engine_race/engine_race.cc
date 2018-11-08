@@ -278,6 +278,36 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 // or just read 800MB from disk?
 // which is faster?
 void EngineRace::BuildHashTable() {
+
+
+  // JIYOU -- begin
+  {
+    int fd = open("/tmp/index", O_RDONLY, 0644);
+    // read 16 bytes every time.
+    struct disk_index di;
+    int cnt = 0;
+    while (true) {
+      ++cnt;
+      di.valid = 0;
+      if (read(fd, &di, 16) != 16) {
+        break;
+      }
+      if (di.valid == 0) break;
+      if (strncmp((char*)&di.key, "0aaaaaaa", 8) == 0) {
+        std::cout << "FIND POS 0aaaaaaa build index = " << di.offset_4k_ << std::endl;
+      }
+      // printf("key = %8s\n", di.key);
+      // assert ((di.offset_4k_ << 12) >= kMaxIndexSize);
+      uint64_t pos = di.offset_4k_; // !! BUG: need to assign to a uint64_t then get the pos.
+      pos <<= 12;                   //    DO NOT USE: uint32_t pos = di.offset_4k << 12; to get.
+      hash_.Set(di.key, pos);
+    }
+    std::cout << "read over" << std::endl;
+    close(fd);
+    return;
+  }
+  // JIYOU  -- end
+
   // the file fd has been open.
 
   // pool of free buffers.
@@ -434,6 +464,63 @@ void EngineRace::WriteEntry() {
   std::vector<write_item*> vs(64, nullptr);
   DEBUG << "db::WriteEntry()" << std::endl;
   vs.clear();
+
+  // JIYOU -- begin
+  int fd = open("/tmp/index", O_CREAT | O_APPEND | O_RDWR, 0644);
+  while (!stop_) {
+    write_queue_.Pop(&vs);
+
+    // value memory head
+
+    for (auto &x: vs) {
+      // write x into /tmp/index file.
+      // write index
+      write(fd, x->key->ToString().c_str(), 8);
+
+      assert (max_data_offset_ >= kMaxIndexSize);
+
+      uint64_t _pos = max_data_offset_ >> 12;
+      assert (_pos <= (kBigFileSize / 4096));
+      uint32_t pos = _pos;
+      write(fd, &pos, 4);
+      int dpos = 1;
+      write(fd, &dpos, 4);
+
+      hash_.Set(x->key->ToString().c_str(), max_data_offset_);
+
+      // write data part.
+      // copy the 4KB value part.
+      memcpy(write_data_buf_, x->value->ToString().c_str(), kPageSize);
+
+      std::cout << "DD " <<  x->key->ToString() << " " << pos << " " << x->value->ToString() << std::endl;
+
+      write_aio_.Clear();
+      write_aio_.PrepareWrite(max_data_offset_, write_data_buf_, kPageSize);
+      write_aio_.Submit();
+      write_aio_.WaitOver();
+
+      read_aio_.Clear();
+      read_aio_.PrepareWrite(max_data_offset_, write_data_buf_, kPageSize);
+      read_aio_.Submit();
+      read_aio_.WaitOver();
+
+      if (memcmp(write_data_buf_, x->value->ToString().c_str(), kPageSize)){
+        std::cout << "memcmp failed" << std::endl;
+        assert(0);
+      }
+
+
+      max_data_offset_ += kPageSize;
+      //fsync(fd);
+      x->feed_back();
+    }
+    fsync(fd);
+  }
+
+  close(fd);
+  return;
+  // JIYOU --end
+
 
   // the position aligned with 1KB in disk.
   //
@@ -616,10 +703,22 @@ void EngineRace::ReadEntry() {
     read_queue_.Pop(&to_read);
     read_aio_.Clear();
     for (auto &x: to_read) {
+      x->buf[0] = 0;
+      assert (x->pos >= kMaxIndexSize);
       read_aio_.PrepareRead(x->pos, x->buf, k4MB >> 2, x);
     }
     read_aio_.Submit();
     read_aio_.WaitOver(); // it will call the call back function.
+
+    // JIYOU --begin
+    for (auto &x: to_read) {
+      if (x->buf[0] == 0) {
+        std::cout << "pos = " << x->pos << std::endl;
+        printf("buf = %20s\n", x->buf);
+      }
+      assert(x->buf[0]); // check read out the data.
+    }
+    // JIYOU --end
   }
 }
 #endif
@@ -716,6 +815,10 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   char *new_buf = lb.buf;
   char *target_buf = const_cast<char*>(value->c_str());
   engine_memcpy(target_buf, new_buf);
+
+  // JIYOU
+  DEBUG << "key = " << key.ToString() << " , pos = " << offset << std::endl;
+  printf("DELTE JIYOU val = %20s\n", new_buf);
 
   return r.ret_code;
 }
