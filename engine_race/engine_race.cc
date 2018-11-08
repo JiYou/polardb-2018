@@ -290,6 +290,7 @@ void EngineRace::BuildHashTable() {
       if (read(fd, &di, 16) != 16) {
         break;
       }
+      if (di.pos == kIndexSkipType) continue;
       if (di.pos == 0) break;
       hash_.Set(di.key, di.pos);
     }
@@ -454,133 +455,34 @@ void EngineRace::WriteEntry() {
   DEBUG << "db::WriteEntry()" << std::endl;
   vs.clear();
 
-  // the position aligned with 1KB in disk.
-  //
-  //      delta = less than 1KB
-  // |***********************......................|
-  // disk_align_1k          |
-  //                    max_index_offset_
-  //
-
-  // mem_tail is where start to append the disk_index.
-  // NOTE: is not the start point of buffer to write to disk.
-  uint64_t disk_align_1k = ROUND_DOWN_1KB(max_index_offset_);
-  uint64_t mem_tail = 0;
-  uint64_t delta = max_index_offset_ - disk_align_1k;
-
-  assert (delta < k1KB);
-  if (delta) {
-    read_aio_.Clear();
-    read_aio_.PrepareRead(disk_align_1k, index_buf_, k1KB /*ROUND_UP_1KB(delta)*/);
-    read_aio_.Submit();
-    read_aio_.WaitOver();
-    mem_tail = delta;
-  }
-
-  assert ((max_index_offset_ - disk_align_1k) == delta && \
-          delta == (mem_tail));
-
-  // at this point.
-  // the position aligned with 1KB in disk.
-  //index_buf              mem_tail
-  // |   delta              |
-  // |======================|......................|
-  //      delta < 1KB
-  // |***********************......................|
-  // disk_align_1k          |
-  //                    max_index_offset_
-  //
-
-  // JIYOU -- begin
-  uint64_t cnt = 0;
-  // JIYOU -- end
+  uint64_t empty_key = 0;
 
   while (!stop_) {
-    vs.clear();
     write_queue_.Pop(&vs);
-
-    // move to mem_tail
-    struct disk_index *di = reinterpret_cast<struct disk_index*>(index_buf_ + mem_tail);
-    // data part just use the head every time.
-    // the value buffer would copy to.
-    uint64_t *to= reinterpret_cast<uint64_t*>(write_data_buf_);
-
-    DEBUG << "vs.size() = " << vs.size() << std::endl;
-
-    for (uint32_t i = 0; i < vs.size(); i++) {
-      auto &x = vs[i];
-      char *key_buf = const_cast<char*>(x->key->ToString().c_str());
-      uint64_t *key = reinterpret_cast<uint64_t*>(key_buf);
-      di->SetKey(key);
-      di->pos = max_data_offset_ + (i<<kValueLengthBits); // unit is 4KB
-
-      // JIYOU -- begin
-      DEBUG << cnt << " " ;
-      printf("key =  %8s ", di->key);
-      std::cout << di->pos << std::endl;
-      // JIYOU -- end
-
-      di++;
-
-      // TODO: opt use fold copy
-      // copy the 4KB value part.
-      char *value = const_cast<char*>(x->value->ToString().c_str());
-      uint64_t *from = reinterpret_cast<uint64_t*>(value);
-      for (uint32_t i = 0; i < kPageSize / sizeof(uint64_t); i++) {
-        *to++ = *from++;
+    struct disk_index *di = reinterpret_cast<struct disk_index*>(index_buf_);
+    // ui *to= reinterpret_cast<uint64_t*>(write_data_buf_);
+    char *to = write_data_buf_;
+    for (uint32_t i = 0; i <= kMaxThreadNumber; i++) {
+      if (i < vs.size()) {
+        auto &x = vs[i];
+        char *key_buf = const_cast<char*>(x->key->ToString().c_str());
+        uint64_t *key = reinterpret_cast<uint64_t*>(key_buf);
+        di->SetKey(key);
+        di->pos = max_data_offset_ + (i<<kValueLengthBits);
+        di++;
+        memcpy(to, x->value->ToString().c_str(), kPageSize);
+        to += kPageSize;
+      } else {
+        di->SetKey(&empty_key);
+        di->pos = kIndexSkipType;
+        di++;
       }
     }
 
-    assert ((di - (reinterpret_cast<struct disk_index*>(index_buf_ + mem_tail))) == vs.size());
-
-    // JIYOU -- begin
-    cnt += vs.size();
-    // JIYOU -- end
-
-    // at this point.
-    // the position aligned with 1KB in disk.
-    //index_buf              mem_tail     ctail
-    // |   delta              |            |       |<- align_1kb
-    // |======================|++++++++++++........|.......
-    //      delta = less than 1KB
-    // |***********************......................|
-    // disk_align_1k          |
-    //                    max_index_offset_
-    //
-    // di maybe not aligned with 1KB.
-    // [di, round_up_1kb(di))  set to 0.
-    uint32_t ctail = mem_tail + (vs.size() << 4);
-    // ROUND_UP 1KB
-    uint32_t align_up_1kb = ROUND_UP_1KB(ctail);
-
-    DEBUG << "ctail = " << ctail << " , " << "align_up_1kb = " << align_up_1kb << std::endl;
-
-    {
-      uint64_t *b = (uint64_t*)(index_buf_ + ctail);
-      uint64_t *e = (uint64_t*)(index_buf_ + align_up_1kb);
-      while (b < e) {
-        *b++ = 0; // set 16 bytes = 0;
-        *b++ = 0;
-      }
-    }
-
-    // at this point.
-    // the position aligned with 1KB in disk.
-    //index_buf              mem_tail     ctail
-    // |   delta              |            |       |<- align_1kb
-    // |======================|++++++++++++00000000|.......
-    //      delta = less than 1KB
-    // |***********************......................|
-    // disk_align_1k          |
-    //                    max_index_offset_
-    //
-    // So: need to write [0, align_1kb)
-    // disk to write: [disk_align_1k, size=align_1kb)
+    //assert ((di - (reinterpret_cast<struct disk_index*>(index_buf_))) == kMaxThreadNumber);
     uint32_t data_write_size = vs.size() << 12;
-
     write_aio_.Clear();
-    DEBUG << "index_write->" << disk_align_1k << " , " << align_up_1kb << std::endl;
-    write_aio_.PrepareWrite(disk_align_1k, index_buf_, align_up_1kb);
+    write_aio_.PrepareWrite(max_index_offset_, index_buf_, k1KB);
     write_aio_.PrepareWrite(max_data_offset_, write_data_buf_, data_write_size);
     write_aio_.Submit();
 
@@ -597,49 +499,8 @@ void EngineRace::WriteEntry() {
       old_pos += kPageSize;
     }
 
-    max_index_offset_ += vs.size() << 4;
+    max_index_offset_ += k1KB;
     max_data_offset_ += data_write_size;
-
-    // at this point.
-    // the position aligned with 1KB in disk.
-    //index_buf              mem_tail     ctail
-    // |   delta              |            |       |<- align_1kb
-    // |======================|++++++++++++00000000|.......
-    //
-    // |***********************************......................|
-    // disk_align_1k      |                |
-    //                    |               max_index_offset_
-    //                    |
-    //                 new_align
-    // need to delete new_align - disk_align_1k;
-    // to avoid duplicate memory write to disk
-    // so, index_buf need to align to new_align
-
-    uint64_t new_align = ROUND_DOWN_1KB(max_index_offset_);
-    // index_buf_ need to walk-front to_walk bytes.
-    uint64_t to_walk = new_align - disk_align_1k;
-
-
-    DEBUG << "up: " << mem_tail << " , " << ctail << " , " << align_up_1kb << std::endl;
-    DEBUG << "dn: " << disk_align_1k << " , " << new_align << " , " << max_index_offset_ << std::endl;
-
-    if (to_walk) {
-      // just need to copy the length: max_index_offset_ - new_align
-      uint32_t move_mem_size = max_index_offset_ - new_align;
-
-      // TODO: change to uint64_t copy
-      char *from = index_buf_ + to_walk;
-      char *to = index_buf_;
-      for (uint32_t i = 0; i < move_mem_size; i++) {
-        *to++ = *from++;
-      }
-      mem_tail = ctail - to_walk;
-      disk_align_1k = new_align;
-    } else {
-      mem_tail = ctail;
-    }
-
-
     // ==================
     // END of co-task
 
@@ -688,9 +549,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   // TODO: add write cache hit system ?
   // if hit the previous value.
   write_item w(&key, &value);
-  DEBUG << "push key: " << key.ToString() <<   std::endl;
   write_queue_.Push(&w);
-  DEBUG << "Push over" << std::endl;
 
   // wait the request writen to disk.
   std::unique_lock<std::mutex> l(w.lock_);
@@ -729,7 +588,8 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     // just copy the buffer.
     char *tob = const_cast<char*>(value->c_str());
     char *fob = lb.buf;
-    engine_memcpy(tob, fob);
+    //engine_memcpy(tob, fob);
+    memcpy(tob, fob, kPageSize);
     return kSucc;
   }
 
@@ -747,7 +607,8 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   if (is_hit && (offset - pre_pos) < max_cache_item) {
     char *from_buf = lb.buf + (offset - pre_pos);
     char *tob = const_cast<char*>(value->c_str());
-    engine_memcpy(tob, from_buf);
+    // engine_memcpy(tob, from_buf);
+    memcpy(tob, from_buf, kPageSize);
     return kSucc;
   }
 
@@ -767,7 +628,8 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   // copy the buffer
   char *new_buf = lb.buf;
   char *target_buf = const_cast<char*>(value->c_str());
-  engine_memcpy(target_buf, new_buf);
+  // engine_memcpy(target_buf, new_buf);
+  memcpy(target_buf, new_buf, kPageSize);
   return r.ret_code;
 }
 

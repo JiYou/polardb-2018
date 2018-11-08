@@ -52,7 +52,6 @@ void read_thread(Engine *engine, char begin_char) {
                 if (cnt % 10000 == 0) std::cout << "+";
                 std::string G = F + o;
                 std::string X;
-                std::cout << "to find G = " << G << std::endl;
                 auto ret = engine->Read(G, &X);
                 assert (ret == kSucc);
                 auto cret = memcmp(V, X.c_str(), 4096);
@@ -95,7 +94,7 @@ int main() {
         "abcdefghijklmnopqrstuvwxyz"
         "~`!@#$%^&*()_+=-,./;:<>";
 
-  for (int i = 0; i < 1; i++) {
+  for (int i = 0; i < kMaxThread; i++) {
     auto front_char = alphanum[i];
     std::thread thd(read_thread, engine, front_char);
     thd.detach();

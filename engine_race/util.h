@@ -45,6 +45,7 @@
 
 // dst must be: char *
 // src must be: const char *
+/*
 #define engine_memcpy(dst,src) do {                                                                         \
   const uint64_t *from = reinterpret_cast<const uint64_t*>(src);                                            \
   uint64_t *to = reinterpret_cast<uint64_t*>(dst);                                                          \
@@ -52,6 +53,7 @@
     *to++ = *from++;                                                                                        \
   }                                                                                                         \
 } while (0)
+*/
 
 #define ROUND_UP_1KB(x) (((x) + 1023) & (~1023))
 #define ROUND_DOWN_1KB(x) ((x) & (~1023))
@@ -79,6 +81,9 @@ constexpr int kMaxIOEvent = 64;
 
 // is key/value disk_item type.
 constexpr uint32_t kValidType = 1;
+
+// use a maxium skip type to jump out the invalid item.
+constexpr uint64_t kIndexSkipType{18446744073709551615ull};
 
 struct wait_item {
   RetCode ret_code = kSucc;
