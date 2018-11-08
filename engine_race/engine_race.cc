@@ -273,172 +273,81 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   return kSucc;
 }
 
-
 // or just read 800MB from disk?
 // which is faster?
 void EngineRace::BuildHashTable() {
-  // JIYOU -- begin
-  {
-    int fd = open("/tmp/test_engine/DB", O_RDONLY, 0644);
-    // read 16 bytes every time.
-    struct disk_index di;
-    int cnt = 0;
-    while (true) {
-      di.pos = 0;
-      if (read(fd, &di, 16) != 16) {
+  // read 4MB from disk. this is a single read.
+
+  std::atomic<uint64_t> md_pos{max_data_offset_};
+  std::atomic<uint64_t> id_pos{max_index_offset_};
+  std::atomic<bool> has_find_valid{false};
+  auto buf_to_hash = [&](char *buf) {
+    // read the buf content then put them into hash table.
+    struct disk_index *array = reinterpret_cast<struct disk_index*>(buf);
+    for (uint32_t i = 0; i < k4MB / sizeof(struct disk_index); i++) {
+      // puth every index into hash table.
+      auto ref = array + i;
+      if (ref->pos == 0) {
         break;
       }
-      if (di.pos == kIndexSkipType) continue;
-      if (di.pos == 0) break;
-      ++cnt;
-      hash_.Set(di.key, di.pos);
-    }
-    std::cout << "read over: cnt = " << cnt << std::endl;
-    close(fd);
-
-    max_index_offset_ = cnt * 16;
-
-    // set the next begin to write position.
-    if (cnt) {
-      max_data_offset_ += kPageSize;
-      max_index_offset_ += sizeof(struct disk_index);
-    } else {
-      DEBUG << "not find valid item" << std::endl;
-    }
-  
-    DEBUG << "max_data_offset_ = " << max_data_offset_ << std::endl;
-    DEBUG << "max_index_offset_ = " << max_index_offset_ << std::endl;
-
-    return;
-  }
-  // JIYOU  -- end
-
-  // pool of free buffers.
-  std::mutex free_buffer_lock;
-  std::vector<char*> free_buffers;
-
-  auto get_free_buf = [&]() {
-    std::unique_lock<std::mutex> l(free_buffer_lock);
-    char *buf = nullptr;
-    if (free_buffers.size() > 0) {
-      buf = free_buffers.back();
-      free_buffers.pop_back();
-    } else {
-      buf = GetAlignedBuffer(k4MB);
-    }
-    return buf;
-  };
-
-  auto put_free_buf = [&](char *buf) {
-    std::unique_lock<std::mutex> l(free_buffer_lock);
-    free_buffers.push_back(buf);
-  };
-
-  auto release_free_buf = [&]() {
-    std::unique_lock<std::mutex> l(free_buffer_lock);
-    for (auto &x: free_buffers) {
-      free(x);
-    }
-    free_buffers.clear();
-  };
-
-  std::deque<char*> buffers;
-  std::atomic<bool> read_over{false};
-  std::mutex lock;
-
-  // read 4MB from disk. this is a single read.
-  auto get_disk_content = [&](uint64_t offset) {
-    char *buf = get_free_buf();
-    read_aio_.Clear();
-    read_aio_.PrepareRead(offset, buf, k4MB);
-    read_aio_.Submit();
-    read_aio_.WaitOver();
-    return buf;
-  };
-
-  max_data_offset_ = kMaxIndexSize;
-  max_index_offset_ = 0;
-  bool has_find_valid = false;
-
-  auto buf_to_hash = [&](char *buf) {
-    // deal with the buffer.
-    if (buf) {
-      // read the buf content then put them into hash table.
-      struct disk_index *array = reinterpret_cast<struct disk_index*>(buf);
-      for (uint32_t i = 0; i < k4MB / sizeof(struct disk_index); i++) {
-        // puth every index into hash table.
-        auto ref = array + i;
-        if (ref->pos) {
-          hash_.Set(ref->key, ref->pos);
-          max_data_offset_ = std::max(max_data_offset_, ref->pos);
-          max_index_offset_ += sizeof(struct disk_index);
-          has_find_valid = true;
-        } else {
-          break;
-        }
+      id_pos += sizeof(struct disk_index);
+      if (ref->pos == kIndexSkipType) {
+        continue;
       }
-      put_free_buf(buf);
+      has_find_valid = true;
+      hash_.Set(ref->key, ref->pos);
+      if (ref->pos > md_pos) {
+        md_pos = ref->pos;
+      }
     }
   };
 
-  // disk_read thread:
-  // read index from [0 ~ 1GB] area.
-  // here contains the checkpoint for
-  // kv index.
-  auto disk_read = [&]() {
-    uint64_t index_offset = 0;
-    while (!read_over && index_offset < kMaxIndexSize) {
-      // Here will spend many time to read content from disk.
-      auto buf = get_disk_content(index_offset);
-      index_offset += k4MB;
-      // get the last uint32_t
+  // there would be 64 thread to read the different
+  // part and 4MB a time. then build the hash map.
+  // such as: thread 0 reads [0, 4MB), [64MB, 68MB)
+  //          thread 1 reads [4MB, 8MB), [68MB, 72MB)
+  //          ....
+  //          thread 63 reads [63*4MB ....)
+  int fd = fd_;
+  auto build_thread = [&](int id) {
+    auto buf = GetAlignedBuffer(k4MB);
+    struct aio_env raio;
+    raio.SetFD(fd);
+    bool read_over = false;
+    uint64_t file_offset = id * k4MB;
+    while (!read_over) {
+      // read data from disk.
+      raio.Clear();
+      raio.PrepareRead(file_offset, buf, k4MB);
+      raio.Submit();
+      raio.WaitOver();
+
+      // check the last uint64_t
       uint64_t *ar = reinterpret_cast<uint64_t*>(buf);
       if (ar[k4MB/8-1] == 0) {
-        read_over = true; // do not break, put the last one.
+        read_over = true;
       }
-      // try to put the disk into bufers;
-      std::unique_lock<std::mutex> l(lock);
-      buffers.push_back(buf);
-    }
-  };
-
-  // insert all the kv-pos into hash table.
-  auto insert_hash = [&]() {
-    while (!read_over) {
-      char *buf = nullptr;
-      lock.lock();
-      // deal with all the buffer.
-      // get the last buffer.
-      if (buffers.size() > 0) {
-        buf = buffers.front();
-        buffers.pop_front();
-      }
-      lock.unlock();
       buf_to_hash(buf);
+      file_offset += k4MB * 64ull; // step is 256MB
     }
-    // read over. deal all the left buffers.
-    for (auto &x: buffers) {
-      buf_to_hash(x);
-    }
-    // free all the buffer
-    // avoid memory leak.
-    release_free_buf();
+    free(buf);
   };
 
-  std::thread thd_disk_read(disk_read);
-  std::thread thd_insert_hash(insert_hash);
-
-  thd_disk_read.join();
-  thd_insert_hash.join();
+  std::vector<std::thread> vthreads;
+  for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
+    vthreads.emplace_back(std::thread(build_thread, i));
+  }
+  for (auto &x: vthreads) {
+    x.join();
+  }
 
   // set the next begin to write position.
+  max_data_offset_ = md_pos;
+  max_index_offset_ = id_pos;
   if (has_find_valid) {
     max_data_offset_ += kPageSize;
     max_index_offset_ += sizeof(struct disk_index);
-  } else {
-    DEBUG << "not find valid item" << std::endl;
   }
-
   DEBUG << "max_data_offset_ = " << max_data_offset_ << std::endl;
   DEBUG << "max_index_offset_ = " << max_index_offset_ << std::endl;
 }
