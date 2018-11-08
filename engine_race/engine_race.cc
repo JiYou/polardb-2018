@@ -78,7 +78,6 @@ RetCode HashTreeTable::Get(const char* key, uint64_t *l) {
   // then begin to search this array.
   LockHashShard(array_pos);
   auto &vs = hash_[array_pos];
-  uint32_t pos = 0;
   kv_info *ptr = nullptr;
   auto ret = find(vs, has_sort_.test(array_pos), *k, &ptr);
 
@@ -86,7 +85,7 @@ RetCode HashTreeTable::Get(const char* key, uint64_t *l) {
     UnlockHashShard(array_pos);
     return kNotFound;
   }
-  pos = ptr->offset_4k_;
+  uint64_t pos = ptr->offset_4k_;
   UnlockHashShard(array_pos);
 
   // just get the offset in the big file.
@@ -279,36 +278,27 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 // which is faster?
 void EngineRace::BuildHashTable() {
 
-
   // JIYOU -- begin
   {
-    int fd = open("/tmp/index", O_RDONLY, 0644);
+    int fd = open("/tmp/test_engine/DB", O_RDONLY, 0644);
     // read 16 bytes every time.
     struct disk_index di;
     int cnt = 0;
     while (true) {
       ++cnt;
-      di.valid = 0;
+      di.pos = 0;
       if (read(fd, &di, 16) != 16) {
         break;
       }
-      if (di.valid == 0) break;
-      if (strncmp((char*)&di.key, "0aaaaaaa", 8) == 0) {
-        std::cout << "FIND POS 0aaaaaaa build index = " << di.offset_4k_ << std::endl;
-      }
-      // printf("key = %8s\n", di.key);
-      // assert ((di.offset_4k_ << 12) >= kMaxIndexSize);
-      uint64_t pos = di.offset_4k_; // !! BUG: need to assign to a uint64_t then get the pos.
-      pos <<= 12;                   //    DO NOT USE: uint32_t pos = di.offset_4k << 12; to get.
-      hash_.Set(di.key, pos);
+      if (di.pos == 0) break;
+      hash_.Set(di.key, di.pos);
     }
-    std::cout << "read over" << std::endl;
+    std::cout << "read over: cnt = " << cnt << std::endl;
     close(fd);
     return;
   }
   // JIYOU  -- end
 
-  // the file fd has been open.
 
   // pool of free buffers.
   std::mutex free_buffer_lock;
@@ -365,10 +355,9 @@ void EngineRace::BuildHashTable() {
       for (uint32_t i = 0; i < k4MB / sizeof(struct disk_index); i++) {
         // puth every index into hash table.
         auto ref = array + i;
-        if (ref->valid) {
-          uint64_t offset = ref->offset_4k_ << kValueLengthBits;
-          hash_.Set(ref->key, offset);
-          max_data_offset_ = std::max(max_data_offset_, offset);
+        if (ref->pos) {
+          hash_.Set(ref->key, ref->pos);
+          max_data_offset_ = std::max(max_data_offset_, ref->pos);
           max_index_offset_ += sizeof(struct disk_index);
           has_find_valid = true;
         } else {
@@ -384,14 +373,14 @@ void EngineRace::BuildHashTable() {
   // here contains the checkpoint for
   // kv index.
   auto disk_read = [&]() {
-    int index_offset = 0;
+    uint64_t index_offset = 0;
     while (!read_over && index_offset < kMaxIndexSize) {
       // Here will spend many time to read content from disk.
       auto buf = get_disk_content(index_offset);
       index_offset += k4MB;
       // get the last uint32_t
-      uint32_t *ar = reinterpret_cast<uint32_t*>(buf);
-      if (ar[k4MB/4-1] == 0) {
+      uint64_t *ar = reinterpret_cast<uint64_t*>(buf);
+      if (ar[k4MB/8-1] == 0) {
         read_over = true; // do not break, put the last one.
       }
       // try to put the disk into bufers;
@@ -465,63 +454,6 @@ void EngineRace::WriteEntry() {
   DEBUG << "db::WriteEntry()" << std::endl;
   vs.clear();
 
-  // JIYOU -- begin
-  int fd = open("/tmp/index", O_CREAT | O_APPEND | O_RDWR, 0644);
-  while (!stop_) {
-    write_queue_.Pop(&vs);
-
-    // value memory head
-
-    for (auto &x: vs) {
-      // write x into /tmp/index file.
-      // write index
-      write(fd, x->key->ToString().c_str(), 8);
-
-      assert (max_data_offset_ >= kMaxIndexSize);
-
-      uint64_t _pos = max_data_offset_ >> 12;
-      assert (_pos <= (kBigFileSize / 4096));
-      uint32_t pos = _pos;
-      write(fd, &pos, 4);
-      int dpos = 1;
-      write(fd, &dpos, 4);
-
-      hash_.Set(x->key->ToString().c_str(), max_data_offset_);
-
-      // write data part.
-      // copy the 4KB value part.
-      memcpy(write_data_buf_, x->value->ToString().c_str(), kPageSize);
-
-      std::cout << "DD " <<  x->key->ToString() << " " << pos << " " << x->value->ToString() << std::endl;
-
-      write_aio_.Clear();
-      write_aio_.PrepareWrite(max_data_offset_, write_data_buf_, kPageSize);
-      write_aio_.Submit();
-      write_aio_.WaitOver();
-
-      read_aio_.Clear();
-      read_aio_.PrepareWrite(max_data_offset_, write_data_buf_, kPageSize);
-      read_aio_.Submit();
-      read_aio_.WaitOver();
-
-      if (memcmp(write_data_buf_, x->value->ToString().c_str(), kPageSize)){
-        std::cout << "memcmp failed" << std::endl;
-        assert(0);
-      }
-
-
-      max_data_offset_ += kPageSize;
-      //fsync(fd);
-      x->feed_back();
-    }
-    fsync(fd);
-  }
-
-  close(fd);
-  return;
-  // JIYOU --end
-
-
   // the position aligned with 1KB in disk.
   //
   //      delta = less than 1KB
@@ -536,7 +468,7 @@ void EngineRace::WriteEntry() {
   uint64_t mem_tail = 0;
   uint64_t delta = max_index_offset_ - disk_align_1k;
 
-  assert (delta < 1024);
+  assert (delta < k1KB);
   if (delta) {
     read_aio_.Clear();
     read_aio_.PrepareRead(disk_align_1k, index_buf_, k1KB /*ROUND_UP_1KB(delta)*/);
@@ -561,6 +493,10 @@ void EngineRace::WriteEntry() {
   // value memory head
   uint64_t *vmh = reinterpret_cast<uint64_t*>(write_data_buf_);
 
+  // JIYOU -- begin
+  uint64_t cnt = 0;
+  // JIYOU -- end
+
   while (!stop_) {
     write_queue_.Pop(&vs);
 
@@ -575,8 +511,14 @@ void EngineRace::WriteEntry() {
       char *key_buf = const_cast<char*>(x->key->ToString().c_str());
       uint64_t *key = reinterpret_cast<uint64_t*>(key_buf);
       di->SetKey(key);
-      di->offset_4k_ = (max_data_offset_ >> kValueLengthBits) + i; // unit is 4KB
-      di->valid = kValidType;
+      di->pos = max_data_offset_ + (i<<kValueLengthBits); // unit is 4KB
+
+      // JIYOU -- begin
+      std::cout << cnt << " " ;
+      printf(" %8s ", di->key);
+      std::cout << di->pos << std::endl;
+      // JIYOU -- end
+
       di++;
 
       // copy the 4KB value part.
@@ -586,6 +528,10 @@ void EngineRace::WriteEntry() {
         *to++ = *from++;
       }
     }
+
+    // JIYOU -- begin
+    cnt += vs.size();
+    // JIYOU -- end
 
     // at this point.
     // the position aligned with 1KB in disk.
@@ -709,16 +655,6 @@ void EngineRace::ReadEntry() {
     }
     read_aio_.Submit();
     read_aio_.WaitOver(); // it will call the call back function.
-
-    // JIYOU --begin
-    for (auto &x: to_read) {
-      if (x->buf[0] == 0) {
-        std::cout << "pos = " << x->pos << std::endl;
-        printf("buf = %20s\n", x->buf);
-      }
-      assert(x->buf[0]); // check read out the data.
-    }
-    // JIYOU --end
   }
 }
 #endif
@@ -815,11 +751,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   char *new_buf = lb.buf;
   char *target_buf = const_cast<char*>(value->c_str());
   engine_memcpy(target_buf, new_buf);
-
-  // JIYOU
-  DEBUG << "key = " << key.ToString() << " , pos = " << offset << std::endl;
-  printf("DELTE JIYOU val = %20s\n", new_buf);
-
   return r.ret_code;
 }
 

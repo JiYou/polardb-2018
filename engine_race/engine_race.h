@@ -27,11 +27,10 @@
 namespace polar_race {
 
 #pragma pack(push, 1)
-// totaly 16 bytes. devided by 4096, easy for read.
+// totaly 16 bytes.
 struct disk_index {
   char key[kMaxKeyLen];      // 8 byte
-  uint32_t offset_4k_;       // 4 byte
-  uint32_t valid;            // 4 byte
+  uint64_t pos;              // 8 byte
   void SetKey(uint64_t *k) {
     uint64_t *a = reinterpret_cast<uint64_t*>(key);
     *a = *k;
