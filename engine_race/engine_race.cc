@@ -324,6 +324,7 @@ void EngineRace::BuildHashTable() {
 
   // read 4MB from disk. this is a single read.
 
+  spinlock md_lock;
   std::atomic<uint64_t> md_pos{max_data_offset_};
   std::atomic<uint64_t> id_pos{max_index_offset_};
   std::atomic<bool> has_find_valid{false};
@@ -341,10 +342,12 @@ void EngineRace::BuildHashTable() {
         continue;
       }
       has_find_valid = true;
+      md_lock.lock();
       hash_.Set(ref->key, ref->pos);
       if (ref->pos > md_pos) {
         md_pos = ref->pos;
       }
+      md_lock.unlock();
     }
   };
 
