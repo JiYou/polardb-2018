@@ -43,18 +43,6 @@
 
 #define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"(): "<<" [" <<strerror(errno) << "] "
 
-// dst must be: char *
-// src must be: const char *
-/*
-#define engine_memcpy(dst,src) do {                                                                         \
-  const uint64_t *from = reinterpret_cast<const uint64_t*>(src);                                            \
-  uint64_t *to = reinterpret_cast<uint64_t*>(dst);                                                          \
-  for (uint32_t i = 0; i < kPageSize / sizeof(uint64_t); i++) {                                             \
-    *to++ = *from++;                                                                                        \
-  }                                                                                                         \
-} while (0)
-*/
-
 #define ROUND_UP_1KB(x) (((x) + 1023) & (~1023))
 #define ROUND_DOWN_1KB(x) ((x) & (~1023))
 

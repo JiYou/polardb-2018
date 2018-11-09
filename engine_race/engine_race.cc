@@ -276,6 +276,51 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 // or just read 800MB from disk?
 // which is faster?
 void EngineRace::BuildHashTable() {
+  // JIYOU -- begin
+  {
+    std::string file_name_str = dir_ + "/" + kBigFileName;
+    const char *file_name = file_name_str.c_str();
+
+    int fd = open(file_name, O_RDONLY, 0644);
+    if (fd < 0) {
+      DEBUG << "open big file failed in build hash\n";
+      return;
+    }
+    // read 16 bytes every time.
+    struct disk_index di;
+    int cnt = 0;
+    int valid_cnt = 0;
+    while (true) {
+      di.pos = 0;
+      if (read(fd, &di, 16) != 16) {
+        break;
+      }
+      if (di.pos == 0) break;
+      ++cnt;
+      if (di.pos == kIndexSkipType) continue;
+      valid_cnt ++;
+      hash_.Set(di.key, di.pos);
+    }
+    std::cout << "read over: cnt = " << cnt << " , valid_cnt = " << valid_cnt << std::endl;
+    close(fd);
+    max_index_offset_ = cnt * 16;
+
+    // set the next begin to write position.
+    if (cnt) {
+      max_data_offset_ += kPageSize;
+      max_index_offset_ += sizeof(struct disk_index);
+    } else {
+      DEBUG << "not find valid item" << std::endl;
+    }
+
+    DEBUG << "max_data_offset_ = " << max_data_offset_ << std::endl;
+    DEBUG << "max_index_offset_ = " << max_index_offset_ << std::endl;
+
+    return;
+  }
+  // JIYOU  -- end
+
+
   // read 4MB from disk. this is a single read.
 
   std::atomic<uint64_t> md_pos{max_data_offset_};
@@ -374,14 +419,11 @@ EngineRace::~EngineRace() {
 void EngineRace::WriteEntry() {
   std::vector<write_item*> vs(64, nullptr);
   DEBUG << "db::WriteEntry()" << std::endl;
-  vs.clear();
-
   uint64_t empty_key = 0;
 
   while (!stop_) {
     write_queue_.Pop(&vs);
     struct disk_index *di = reinterpret_cast<struct disk_index*>(index_buf_);
-    // ui *to= reinterpret_cast<uint64_t*>(write_data_buf_);
     char *to = write_data_buf_;
     for (uint32_t i = 0; i <= kMaxThreadNumber; i++) {
       if (i < vs.size()) {
@@ -400,7 +442,6 @@ void EngineRace::WriteEntry() {
       }
     }
 
-    //assert ((di - (reinterpret_cast<struct disk_index*>(index_buf_))) == kMaxThreadNumber);
     uint32_t data_write_size = vs.size() << 12;
     write_aio_.Clear();
     write_aio_.PrepareWrite(max_index_offset_, index_buf_, k1KB);
