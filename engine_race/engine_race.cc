@@ -210,8 +210,9 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
         return;
       }
       // if open success.
-      if (posix_fallocate(engine_race->fd_, 0, kBigFileSize)) {
-        DEBUG << "posix_fallocate failed\n";
+      int ret = 0;
+      if ((ret=posix_fallocate(engine_race->fd_, 0, kBigFileSize))) {
+        DEBUG << "posix_fallocate failed, ret = " << ret << std::endl;
         meet_error = true;
         return;
       }
