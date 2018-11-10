@@ -2,7 +2,7 @@
 
 #include "util.h"
 #include "engine_race.h"
-#include "libaio.h"
+#include "engine_aio.h"
 
 #include <assert.h>
 #include <stdio.h>

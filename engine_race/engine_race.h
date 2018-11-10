@@ -4,7 +4,7 @@
 #include "include/engine.h"
 #include "spin_lock.h"
 #include "util.h"
-#include "libaio.h"
+#include "engine_aio.h"
 
 #include <assert.h>
 #include <stdint.h>
