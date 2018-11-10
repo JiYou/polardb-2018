@@ -1,5 +1,7 @@
 #pragma once
 
+// wrapper for the linux system-call API.
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -54,7 +56,7 @@ struct iocb {
   void *data;
 	unsigned key, __pad2;
 
-	short		aio_lio_opcode;	
+	short		aio_lio_opcode;
 	short		aio_reqprio;
 	int		aio_fildes;
 
