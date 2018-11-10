@@ -310,7 +310,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
     engine_race->hash_.PrintMeanStdDev();
   }
 
-  engine_race->start();
   *eptr = engine_race;
 
   return kSucc;
@@ -449,6 +448,8 @@ EngineRace::~EngineRace() {
   if (-1 != fd_) {
     close(fd_);
   }
+
+  // to join the read/write thread?
 }
 
 void EngineRace::WriteEntry() {
@@ -624,17 +625,26 @@ void EngineRace::ReadEntry() {
 }
 #endif
 
-void EngineRace::start() {
-  std::thread write_thread_(&EngineRace::WriteEntry, this);
-  write_thread_.detach();
-
-#ifdef READ_QUEUE
-  std::thread read_thread_(&EngineRace::ReadEntry, this);
-  read_thread_.detach();
-#endif
+void EngineRace::start_write_thread() {
+  static std::once_flag initialized_write;
+  std::call_once (initialized_write, [this] {
+    std::thread write_thread_(&EngineRace::WriteEntry, this);
+    write_thread_.detach();
+  });
 }
 
+#ifdef READ_QUEUE
+void EngineRace::start_read_thread() {
+  static std::once_flag initialized_read;
+  std::call_once (initialized_read, [this] {
+    std::thread read_thread_(&EngineRace::ReadEntry, this);
+    read_thread_.detach();
+  });
+}
+#endif
+
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
+  start_write_thread();
   // TODO: add write cache hit system ?
   // if hit the previous value.
   write_item w(&key, &value);
@@ -648,6 +658,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
 
 // for 64 read threads, it would take 64MB as cache read.
 RetCode EngineRace::Read(const PolarString& key, std::string* value) {
+  start_read_thread();
   // compute the position.
   // just give pos,buf to read queue.
   struct local_buf {

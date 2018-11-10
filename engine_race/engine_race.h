@@ -443,7 +443,11 @@ class EngineRace : public Engine  {
   void ReadEntry();
 #endif
 
-  void start();
+  void start_write_thread();
+
+#ifdef READ_QUEUE
+  void start_read_thread();
+#endif
 
  private:
   std::string dir_;
@@ -456,9 +460,8 @@ class EngineRace : public Engine  {
   // write aio: NOTE: no thread safe.
   struct aio_env read_aio_;
 
-  // char *write_data_buf_ = nullptr; //  256KB
-  // char *index_buf_ = nullptr; // 4KB
-  // char *read_data_buf_ = nullptr; // 4MB
+  // mmap_ptr;
+  char *data_part_ = nullptr;
 
   // control of the write_queue.
   std::atomic<bool> stop_{false};
