@@ -289,27 +289,9 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   };
   std::thread thd_creat_lock_file(creat_lock_file);
 
-  // setup write buffer.
-  // 4KB for index
-  // 256KB for write data
-  auto alloc_buf = [&engine_race, &meet_error] () {
-    engine_race->index_buf_ = GetAlignedBuffer(kPageSize);
-    if (!(engine_race->index_buf_)) {
-      meet_error = true;
-      return;
-    }
-    engine_race->write_data_buf_ = GetAlignedBuffer(kPageSize * kMaxThreadNumber + 2 * kPageSize);
-    if (!(engine_race->write_data_buf_)) {
-      meet_error = true;
-      return;
-    }
-  };
-  std::thread thd_alloc_buf(alloc_buf);
-
   // next thread to create the big file.
   thd_create_big_file.join();
   thd_creat_lock_file.join();
-  thd_alloc_buf.join();
   if (meet_error) {
     delete engine_race;
     return kIOError;
@@ -464,29 +446,109 @@ EngineRace::~EngineRace() {
     UnlockFile(db_lock_);
   }
 
-  if (index_buf_) {
-    free(index_buf_);
-  }
-
-  if (write_data_buf_) {
-    free(write_data_buf_);
-  }
-
   if (-1 != fd_) {
     close(fd_);
   }
 }
 
 void EngineRace::WriteEntry() {
+  // there are two threads here.
+  // one is just flush the io into disks
+  // after submit, then it return to client.
+  // the other one, call the WaitOver with specific time.
+  struct aio_mgr {
+    std::mutex free_lock;
+    std::condition_variable free_cond;
+    std::vector<struct aio_env_two*> free_io;
+
+    std::mutex data_lock;
+    std::condition_variable data_cond;
+    std::deque<struct aio_env_two*> data_io;
+
+    std::atomic<bool> game_over {false};
+    // every round of write,
+    // 1KB for index. 256KB for data.
+    // then nearly 257MB for all the buffer and memory.
+    #define TWO_AIO_SZ 1024
+    struct aio_env_two _aio_[TWO_AIO_SZ];
+    aio_mgr(int fd_) {
+      for (uint64_t i = 0; i < TWO_AIO_SZ; i++) {
+        _aio_[i].SetFD(fd_);
+        free_io.push_back(_aio_+i);
+      }
+    }
+
+    ~aio_mgr() {
+      game_over = true;
+    }
+
+    struct aio_env_two *GetFreeAIO() {
+      std::unique_lock<std::mutex> l(free_lock);
+      free_cond.wait(l, [&] { return free_io.size() > 0 || game_over; });
+      if (game_over) {
+        return nullptr;
+      }
+      auto *aio= free_io.back();
+      free_io.pop_back();
+      return aio;
+    }
+
+    void PutFreeAIO(struct aio_env_two *aio) {
+      std::unique_lock<std::mutex> l(free_lock);
+      free_io.push_back(aio);
+      free_cond.notify_one();
+    }
+
+    // must get from front buffer.
+    struct aio_env_two *GetDataAIO() {
+      std::unique_lock<std::mutex> l(data_lock);
+      data_cond.wait(l, [&] { return data_io.size() > 0 || game_over; });
+      if (game_over) {
+        return nullptr;
+      }
+      auto *aio = data_io.front();
+      data_io.pop_front();
+      return aio;
+    }
+
+    void PutDataAIO(struct aio_env_two *aio) {
+      std::unique_lock<std::mutex> l(data_lock);
+      data_io.push_back(aio);
+      data_cond.notify_one();
+    }
+  };
+
+  struct aio_mgr mgr(fd_);
+
+  auto wait_aio = [&]() {
+    while (!mgr.game_over) {
+      auto aio = mgr.GetDataAIO();
+      if (!aio) {
+        break;
+      }
+      aio->WaitOver();
+      mgr.PutFreeAIO(aio);
+    }
+  };
+  std::thread thd_wait_aio(wait_aio);
+
   std::vector<write_item*> vs(64, nullptr);
   DEBUG << "db::WriteEntry()" << std::endl;
   uint64_t empty_key = 0;
 
   while (!stop_) {
     write_queue_.Pop(&vs);
-    struct disk_index *di = reinterpret_cast<struct disk_index*>(index_buf_);
-    char *to = write_data_buf_;
-    for (uint32_t i = 0; i <= kMaxThreadNumber; i++) {
+
+    // get free aio
+    auto aio = mgr.GetFreeAIO();
+    if (!aio) {
+      break;
+    }
+
+    struct disk_index *di = reinterpret_cast<struct disk_index*>(aio->index_buf);
+    char *to = aio->data_buf;
+
+    for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
       if (i < vs.size()) {
         auto &x = vs[i];
         char *key_buf = const_cast<char*>(x->key->ToString().c_str());
@@ -504,11 +566,12 @@ void EngineRace::WriteEntry() {
     }
 
     uint32_t data_write_size = vs.size() << 12;
-    write_aio_.Clear();
-    write_aio_.PrepareWrite(max_index_offset_, index_buf_, k1KB);
-    write_aio_.PrepareWrite(max_data_offset_, write_data_buf_, data_write_size);
-    write_aio_.Submit();
+    aio->Clear();
+    aio->PrepareWrite(max_index_offset_, aio->index_buf, k1KB);
+    aio->PrepareWrite(max_data_offset_, aio->data_buf, data_write_size);
+    aio->Submit();
 
+    mgr.PutDataAIO(aio);
     // then you can do something here usefull. instead of waiting the disk write over.
     // ==================
     // BEGIN of co-task
@@ -527,15 +590,18 @@ void EngineRace::WriteEntry() {
     // ==================
     // END of co-task
 
-    BEGIN_POINT(begin_wait_disk_over);
-    write_aio_.WaitOver(); // would stuck here.
-    END_POINT(end_write_disk_over, begin_wait_disk_over, "write_aio_.WaitOver()");
+    //BEGIN_POINT(begin_wait_disk_over);
+    //write_aio_.WaitOver(); // would stuck here.
+    //END_POINT(end_write_disk_over, begin_wait_disk_over, "write_aio_.WaitOver()");
 
     // ack all the writers.
     for (auto &x: vs) {
       x->feed_back();
     }
   }
+
+  mgr.game_over = true;
+  thd_wait_aio.join();
 }
 
 #ifdef READ_QUEUE

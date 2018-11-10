@@ -125,6 +125,121 @@ class HashTreeTable {
 };
 
 // this struct does not manage file & buffer
+// 2 AIO context
+struct aio_env_two {
+
+  static constexpr int two_event = 2;
+  void SetFD(int fd_) {
+    fd = fd_;
+  }
+
+  aio_env_two() {
+    // prepare the io context.
+    memset(&ctx, 0, sizeof(ctx));
+    if (io_setup(two_event, &ctx) < 0) {
+      DEBUG << "Error in io_setup" << std::endl;
+    }
+
+    timeout.tv_sec = 0;
+    timeout.tv_nsec = 0;
+
+    memset(&iocb, 0, sizeof(iocb));
+    iocbs = (struct iocb**) malloc(sizeof(struct iocb*) * two_event);
+    for (int i = 0; i < two_event; i++) {
+      iocbs[i] = iocb + i;
+      //iocb[i].aio_lio_opcode = IO_CMD_PREAD;
+      iocb[i].aio_reqprio = 0;
+      // iocb[i].u.c.nbytes = kPageSize;
+      // iocb->u.c.offset = offset;
+      // iocb->aio_fildes = fd;
+      // iocb->u.c.buf = buf;
+    }
+
+    index_buf = GetAlignedBuffer(k1KB);  // 1KB for write index.
+    if (!index_buf) {
+      DEBUG << "aligned memory for aio_2 index failed\n";
+    }
+    data_buf = GetAlignedBuffer(k256KB); // 256KB for write data.
+    if (!data_buf) {
+      DEBUG << "ailgned memory for aio_2 data failed\n";
+    }
+  }
+
+  void PrepareRead(uint64_t offset, char *out, uint32_t size, wait_item* item=nullptr) {
+    // align with 4 kb
+    assert ((((uint64_t)out) & 4095) == 0);
+    assert ((size & 1023) == 0);
+    // prepare the io
+    iocb[index].aio_fildes = fd;
+    iocb[index].u.c.offset = offset;
+    iocb[index].u.c.buf = out;
+    iocb[index].u.c.nbytes = size;
+    iocb[index].aio_lio_opcode = IO_CMD_PREAD;
+    iocb[index].data = item;
+    index++;
+  }
+
+  void PrepareWrite(uint64_t offset, char *out, uint32_t size, wait_item *item=nullptr) {
+    assert ((((uint64_t)out) & 4095) == 0);
+    assert ((size & 1023) == 0);
+
+    iocb[index].aio_fildes = fd;
+    iocb[index].u.c.offset = offset;
+    iocb[index].u.c.buf = out;
+    iocb[index].u.c.nbytes = size;
+    iocb[index].aio_lio_opcode = IO_CMD_PWRITE;
+    iocb[index].data = item;
+    index++;
+  }
+
+  void Clear() {
+    index = 0;
+  }
+
+  RetCode Submit() {
+    if ((io_submit(ctx, index, iocbs)) != index) {
+      DEBUG << "io_submit meet error, " << std::endl;;
+      printf("io_submit error\n");
+      return kIOError;
+    }
+    return kSucc;
+  }
+
+  void WaitOver() {
+    int write_over_cnt = 0;
+    while (write_over_cnt != index) {
+      constexpr int min_number = 1;
+      int num_events = io_getevents(ctx, min_number, index, events, &timeout);
+      assert (num_events >= 0);
+      for (int i = 0; i < num_events; i++) {
+        wait_item *feed_back = reinterpret_cast<wait_item*>(events[i].data);
+        if (feed_back) {
+          feed_back->feed_back();
+        }
+      }
+      // need to call for (i = 0; i < num_events; i++) events[i].call_back();
+      write_over_cnt += num_events;
+    }
+  }
+
+  ~aio_env_two() {
+    io_destroy(ctx);
+    free(index_buf);
+    free(data_buf);
+  }
+
+  char *index_buf = nullptr; 
+  char *data_buf = nullptr;
+  int fd = 0;
+  int index = 0;
+  io_context_t ctx;
+  struct iocb iocb[two_event];
+  struct iocb** iocbs = nullptr;
+  struct io_event events[two_event];
+  struct timespec timeout;
+};
+
+
 // it just set env for aio.
 // Usage:
 // struct aio_env io_;
@@ -134,7 +249,6 @@ class HashTreeTable {
 // io_.Submit();
 // io_.WaitOver();
 // io_.Clear();
-
 struct aio_env {
 
   void SetFD(int fd_) {
@@ -342,8 +456,8 @@ class EngineRace : public Engine  {
   // write aio: NOTE: no thread safe.
   struct aio_env read_aio_;
 
-  char *write_data_buf_ = nullptr; //  256KB
-  char *index_buf_ = nullptr; // 4KB
+  // char *write_data_buf_ = nullptr; //  256KB
+  // char *index_buf_ = nullptr; // 4KB
   // char *read_data_buf_ = nullptr; // 4MB
 
   // control of the write_queue.
