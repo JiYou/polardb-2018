@@ -27,28 +27,27 @@ int main() {
         "abcdefghijklmnopqrstuvwxyz";
 
   std::string str;
-  for (int i = 0; i < 67; i++) {
+  for (int i = 0; i < 1; i++) {
     char buf[4096];
     memset(buf, i % 26 + 'a', 4096);
     str = "";
     for (int j = 0; j < 8; j++) {
-      str[j] = i % 26 + 'a';
+      str[j] = i % 26 + 'B';
     }
     std::cout << "i = " << i << " get_str = " << str << std::endl;
     ret = engine->Write(str.c_str(), buf);
   }
 
   std::string value;
-  for (int i = 0; i < 67; i++) {
+  for (int i = 0; i < 1; i++) {
     str = "";
     for (int j = 0; j < 8; j++) {
-      str[j] = i % 26 + 'a';
+      str[j] = i % 26 + 'B';
     }
     std::cout << "i = " << i << " get_str = " << str.c_str() << std::endl;
     ret = engine->Read(str.c_str(), &value);
     std::cout << "value = " << value << std::endl;
   }
-
 
   delete engine;
   return 0;

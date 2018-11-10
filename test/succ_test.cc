@@ -117,7 +117,7 @@ int main(void) {
   std::cout << sizeof(struct iocb) << std::endl;
 
   polar_race::aio_env ev;
-  char *buf = polar_race::GetAlignedBuffer(polar_race::kPageSize);
+  char *buf = polar_race::GetAlignedBuffer(polar_race::kPageSize * 1024 * 4);
   for (int i = 0; i < 100; i ++) {
     buf[i] = 'c';
   }

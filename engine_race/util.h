@@ -55,10 +55,11 @@ constexpr size_t kMaxBucketSize = 17 * 19 * 23 * 29 * 31 + 1;
 constexpr int kSingleRequest = 1;
 constexpr int kMinNumber = 1;
 constexpr int kPageSize = 4096;
-constexpr uint32_t k1KB = kPageSize >> 2;
-constexpr uint32_t kReadValueCnt = 1024;
+constexpr uint64_t k1KB = kPageSize >> 2;
+constexpr uint64_t kReadValueCnt = 1024;
 constexpr uint64_t k4MB = kPageSize * 1024;
-constexpr uint32_t kMaxIndexSize = 1024 * 1024 * 1024; // 1GB
+constexpr uint64_t k16MB = k4MB * 4;
+constexpr uint64_t kMaxIndexSize = 1024 * 1024 * 1024; // 1GB
 constexpr int kLastCharIn4MB = k4MB - 1;
 constexpr uint64_t k251230MB = 251230;
 constexpr uint64_t kBigFileSize{263433748480};
