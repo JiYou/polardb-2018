@@ -59,10 +59,9 @@ constexpr uint64_t k1KB = kPageSize >> 2;
 constexpr uint64_t kReadValueCnt = 1024;
 constexpr uint64_t k4MB = kPageSize * 1024;
 constexpr uint64_t k16MB = k4MB * 4;
-constexpr uint64_t kMaxIndexSize = 1024 * 1024 * 1024; // 1GB
+constexpr uint64_t kMaxIndexSize{2 * k16MB * 64ull}; // 2GB
 constexpr int kLastCharIn4MB = k4MB - 1;
-constexpr uint64_t k251230MB = 251230;
-constexpr uint64_t kBigFileSize{263433748480};
+constexpr uint64_t kBigFileSize{279172874240ull}; // 260GB
 constexpr int kValueLengthBits = 12;  // stands for 4K
 constexpr size_t kMaxQueueSize = 128; // 4K * 4Kitem ~= 16MB
 constexpr int kMaxThreadNumber = 64; // max number of thread.
