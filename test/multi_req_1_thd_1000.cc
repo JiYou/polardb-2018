@@ -20,6 +20,33 @@
 #define LOG(x) std::cout
 #define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"()"<<"msg="<<strerror(errno)
 
+static inline void io_set_callback(struct iocb *iocb, io_callback_t cb)
+{
+  iocb->data = (void *)cb;
+}
+
+static inline void io_prep_pread(struct iocb *iocb, int fd, void *buf, size_t count, long long offset)
+{
+  memset(iocb, 0, sizeof(*iocb));
+  iocb->aio_fildes = fd;
+  iocb->aio_lio_opcode = IO_CMD_PREAD;
+  iocb->aio_reqprio = 0;
+  iocb->u.c.buf = buf;
+  iocb->u.c.nbytes = count;
+  iocb->u.c.offset = offset;
+}
+
+static inline void io_prep_pwrite(struct iocb *iocb, int fd, void *buf, size_t count, long long offset)
+{
+  memset(iocb, 0, sizeof(*iocb));
+  iocb->aio_fildes = fd;
+  iocb->aio_lio_opcode = IO_CMD_PWRITE;
+  iocb->aio_reqprio = 0;
+  iocb->u.c.buf = buf;
+  iocb->u.c.nbytes = count;
+  iocb->u.c.offset = offset;
+}
+
 // 1000 request at a time.
 // 1003.40iops 489.84MB
 // offset = i * kPageSize

@@ -37,6 +37,33 @@ const char *file_name = "/tmp/write.dat";
 constexpr int kMaxThread = 64; // 1000 blocks with 4KB a block.
 constexpr int kPageSize = 4096;
 
+static inline void io_set_callback(struct iocb *iocb, io_callback_t cb)
+{
+  iocb->data = (void *)cb;
+}
+
+static inline void io_prep_pread(struct iocb *iocb, int fd, void *buf, size_t count, long long offset)
+{
+  memset(iocb, 0, sizeof(*iocb));
+  iocb->aio_fildes = fd;
+  iocb->aio_lio_opcode = IO_CMD_PREAD;
+  iocb->aio_reqprio = 0;
+  iocb->u.c.buf = buf;
+  iocb->u.c.nbytes = count;
+  iocb->u.c.offset = offset;
+}
+
+static inline void io_prep_pwrite(struct iocb *iocb, int fd, void *buf, size_t count, long long offset)
+{
+  memset(iocb, 0, sizeof(*iocb));
+  iocb->aio_fildes = fd;
+  iocb->aio_lio_opcode = IO_CMD_PWRITE;
+  iocb->aio_reqprio = 0;
+  iocb->u.c.buf = buf;
+  iocb->u.c.nbytes = count;
+  iocb->u.c.offset = offset;
+}
+
 /*
  * TO: test is thread safe for multi-thread using the same fd?
  * aio read example.
