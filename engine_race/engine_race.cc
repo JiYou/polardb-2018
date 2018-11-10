@@ -302,12 +302,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   // the fd_ is opened.
   // after build Hash table, also record the next to write pos.
   if (!new_db) {
-    BEGIN_POINT(begin_build_hash_table);
-    engine_race->BuildHashTable();
-    END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
-
-    engine_race->hash_.Sort();
-    engine_race->hash_.PrintMeanStdDev();
   }
 
   *eptr = engine_race;
@@ -318,6 +312,7 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 // or just read 800MB from disk?
 // which is faster?
 void EngineRace::BuildHashTable() {
+  hash_.Init();
   // use two thread, on read every 16MB from disk.
   // the other one insert the item into hash table.
   struct buffer_mgr {
@@ -578,6 +573,14 @@ void EngineRace::WriteEntry() {
     // BEGIN of co-task
 
     // update the hash table at the same time.
+    // ***********************************************************
+    // NOTE: because the write/read is split
+    // So, there no need to update the hash table.
+    // If read happen, it would load the hash table from disk.
+    // this will save the memory for write process
+    // and speed up the write process.
+    // **********************************************************
+    /*
     uint64_t old_pos = max_data_offset_;
     for (auto &x: vs) {
       // begin to insert all the items into HashTable.
@@ -585,6 +588,7 @@ void EngineRace::WriteEntry() {
       hash_.SetNoLock(x->key->ToString().c_str(), old_pos);
       old_pos += kPageSize;
     }
+    */
 
     max_index_offset_ += k1KB;
     max_data_offset_ += data_write_size;
@@ -743,6 +747,18 @@ RetCode EngineRace::ReadUseQueue(const PolarString& key, std::string *value) {
 
 // for 64 read threads, it would take 64MB as cache read.
 RetCode EngineRace::Read(const PolarString& key, std::string* value) {
+  // lasy init of hash table.
+  // init the read map.
+  static std::once_flag init_mptr;
+  std::call_once (init_mptr, [this] {
+    BEGIN_POINT(begin_build_hash_table);
+    BuildHashTable();
+    END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
+
+    hash_.Sort();
+    hash_.PrintMeanStdDev();
+  });
+
 #ifdef READ_QUEUE
   return ReadUseQueue(key, value);
 #endif

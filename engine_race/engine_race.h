@@ -69,12 +69,15 @@ class HashTreeTable {
 
  public:
 
+  void Init() {
+    hash_.resize(kMaxBucketSize);
+  }
+
 #ifdef HASH_LOCK
   HashTreeTable(): hash_lock_(kMaxBucketSize) {
 #else
   HashTreeTable() {
 #endif
-    hash_.resize(kMaxBucketSize);
   }
   ~HashTreeTable() { }
 
@@ -228,7 +231,7 @@ struct aio_env_two {
     free(data_buf);
   }
 
-  char *index_buf = nullptr; 
+  char *index_buf = nullptr;
   char *data_buf = nullptr;
   int fd = 0;
   int index = 0;

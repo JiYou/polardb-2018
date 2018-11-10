@@ -99,10 +99,6 @@ int main() {
   std::unique_lock<std::mutex> l(mu);
   cond.wait(l, [&] { return write_cnt == kMaxThread; });
 
-  std::string value;
-  ret = engine->Read("xxxxxxxyyy", &value);
-  printf("[WARN]: TEST_NOT_FOUND [PASS] can not find the item. ret = %d\n", ret);
-
   delete engine;
   return 0;
 }
