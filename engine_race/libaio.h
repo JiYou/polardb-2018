@@ -26,8 +26,6 @@ typedef enum io_iocb_cmd {
 	IO_CMD_PWRITEV = 8,
 } io_iocb_cmd_t;
 
-#define PADDEDul(x, y)	unsigned long x
-
 struct io_iocb_poll {
 	int events, __pad1;
 };
@@ -39,7 +37,7 @@ struct io_iocb_sockaddr {
 
 struct io_iocb_common {
   void *buf;
-	PADDEDul(nbytes, __pad2);
+  unsigned long nbytes;
 	long long	offset;
 	long long	__pad3;
 	unsigned	flags;
@@ -71,12 +69,10 @@ struct iocb {
 struct io_event {
   void *data;
   struct iocb *obj;
-	PADDEDul(res,  __pad3);
-	PADDEDul(res2, __pad4);
+  unsigned long res;
+  unsigned long res2;
 };
 
-#undef PADDED
-#undef PADDEDul
 
 typedef void (*io_callback_t)(io_context_t ctx, struct iocb *iocb, long res, long res2);
 
