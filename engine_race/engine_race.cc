@@ -656,9 +656,30 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   return w.ret_code;
 }
 
-// for 64 read threads, it would take 64MB as cache read.
-RetCode EngineRace::Read(const PolarString& key, std::string* value) {
+#ifdef USE_MAP
+RetCode EngineRace::ReadUseMap(const PolarString& key, std::string *value) {
+  {
+    // init the read map.
+    static std::once_flag init_mptr;
+    std::call_once (init_mptr, [] {
+      mptr_ = mmap(NULL,
+                      kBigFileSize,
+                      PROT_READ,
+                      MAP_SHARED | MAP_HUGE_1GB | MAP_NONBLOCK | MAP_POPULATE,
+                      fd_,
+                      kMaxIndexSize);
+      if (mptr_ == MAP_FAILED) {
+        DEBUG << "mmap for read failed\n";
+      }
+    });
+  }
+}
+#endif
+
+#ifdef READ_QUEUE
+RetCode EngineRace::ReadUseQueue(const PolarString& key, std::string *value) {
   start_read_thread();
+
   // compute the position.
   // just give pos,buf to read queue.
   struct local_buf {
@@ -716,6 +737,19 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   // engine_memcpy(target_buf, new_buf);
   memcpy(target_buf, new_buf, kPageSize);
   return r.ret_code;
+
+}
+#endif
+
+// for 64 read threads, it would take 64MB as cache read.
+RetCode EngineRace::Read(const PolarString& key, std::string* value) {
+#ifdef READ_QUEUE
+  return ReadUseQueue(key, value);
+#endif
+
+#ifdef USE_MAP
+  return ReadUseMap(key, value);
+#endif
 }
 
 RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,

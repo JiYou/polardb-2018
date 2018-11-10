@@ -441,12 +441,14 @@ class EngineRace : public Engine  {
 
 #ifdef READ_QUEUE
   void ReadEntry();
+  RetCode  ReadUseQueue(const PolarString& key, std::string *value);
 #endif
 
   void start_write_thread();
 
 #ifdef READ_QUEUE
   void start_read_thread();
+  RetCode ReadUseMap(const PolarString& key, std::string *value);
 #endif
 
  private:
@@ -460,8 +462,10 @@ class EngineRace : public Engine  {
   // write aio: NOTE: no thread safe.
   struct aio_env read_aio_;
 
-  // mmap_ptr;
-  char *data_part_ = nullptr;
+#ifdef USE_MAP
+  // mmaped data ptr
+  char *mptr_ = nullptr;
+#endif
 
   // control of the write_queue.
   std::atomic<bool> stop_{false};
@@ -480,21 +484,6 @@ class EngineRace : public Engine  {
 
 #ifdef READ_QUEUE
   Queue<read_item> read_queue_;
-#endif
-
-#ifdef PERF_COUNT
-  // perfcounters for the read items.
-  //
-  // How many interval of items to print stat time.
-  std::atomic<uint64_t> print_interval_{10000};
-  std::atomic<uint64_t> item_cnt_{0};
-  // all time is in nonoseconds.
-  // record the hash lookup time.
-  std::atomic<uint64_t> hash_time_cnt_{0};
-  // record the total disk_io read time.
-  std::atomic<uint64_t> io_time_read_cnt_{0};
-  // record the total disk_io write time.
-  std::atomic<uint64_t> io_time_write_cnt_{0};
 #endif
 };
 
