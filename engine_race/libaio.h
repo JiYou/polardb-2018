@@ -1,5 +1,11 @@
 #pragma once
 
+// NOTE: from #include <linux/aio_abi.h>
+// below struct is mainly defined in linux header files.
+// in-order to use without install linux-headers package.
+// Her just define these struct to call the
+// linux-system-call to avoid the platform compile
+// failed with struct not defined.
 // wrapper for the linux system-call API.
 
 #ifdef __cplusplus
@@ -35,7 +41,7 @@ struct io_iocb_poll {
 struct io_iocb_sockaddr {
 	struct sockaddr *addr;
 	int		len;
-};	/* result code is the length of the sockaddr, or -'ve errno */
+};
 
 struct io_iocb_common {
   void *buf;
@@ -44,13 +50,13 @@ struct io_iocb_common {
 	long long	__pad3;
 	unsigned	flags;
 	unsigned	resfd;
-};	/* result code is the amount read or -'ve errno */
+};
 
 struct io_iocb_vector {
 	const struct iovec	*vec;
 	int			nr;
 	long long		offset;
-};	/* result code is the amount read or -'ve errno */
+};
 
 struct iocb {
   void *data;
@@ -78,7 +84,7 @@ struct io_event {
 
 typedef void (*io_callback_t)(io_context_t ctx, struct iocb *iocb, long res, long res2);
 
-/* Actual syscalls */
+/* Linux syscalls */
 extern int io_setup(int maxevents, io_context_t *ctxp);
 extern int io_destroy(io_context_t ctx);
 extern int io_submit(io_context_t ctx, long nr, struct iocb *ios[]);
