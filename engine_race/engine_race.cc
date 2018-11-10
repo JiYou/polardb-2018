@@ -34,6 +34,8 @@ uint32_t HashTreeTable::compute_pos(uint64_t x) {
   return (((((x % 17) * 19 + x % 19) * 23 + x % 23) * 29 + x % 29) * 31 + x % 31);
 }
 
+#ifdef HASH_LOCK
+
 void HashTreeTable::LockHashShard(uint32_t index) {
   spin_lock(hash_lock_[index]);
 }
@@ -41,6 +43,7 @@ void HashTreeTable::LockHashShard(uint32_t index) {
 void HashTreeTable::UnlockHashShard(uint32_t index) {
   spin_unlock(hash_lock_[index]);
 }
+#endif
 
 RetCode HashTreeTable::find(std::vector<kv_info> &vs,
                             bool sorted,
@@ -70,6 +73,31 @@ RetCode HashTreeTable::find(std::vector<kv_info> &vs,
   return kNotFound;
 }
 
+RetCode HashTreeTable::GetNoLock(const char* key, uint64_t *l) {
+  const uint64_t *k = reinterpret_cast<const uint64_t*>(key);
+  const uint64_t array_pos = compute_pos(*k);
+
+  // then begin to search this array.
+  auto &vs = hash_[array_pos];
+  kv_info *ptr = nullptr;
+  auto ret = find(vs, has_sort_.test(array_pos), *k, &ptr);
+
+  if (ret == kNotFound) {
+    return kNotFound;
+  }
+  uint64_t pos = ptr->offset_4k_;
+
+  // just get the offset in the big file.
+  *l = pos;
+  *l <<= kValueLengthBits;
+  return kSucc;
+}
+
+RetCode HashTreeTable::GetNoLock(const std::string &key, uint64_t *l) {
+  return GetNoLock(key.c_str(), l);
+}
+
+#ifdef HASH_LOCK
 // l is the real offset.
 RetCode HashTreeTable::Get(const char* key, uint64_t *l) {
   const uint64_t *k = reinterpret_cast<const uint64_t*>(key);
@@ -97,6 +125,33 @@ RetCode HashTreeTable::Get(const char* key, uint64_t *l) {
 RetCode HashTreeTable::Get(const std::string &key, uint64_t *l) {
   return Get(key.c_str(), l);
 }
+#endif
+
+RetCode HashTreeTable::SetNoLock(const char *key, uint64_t l) {
+  const int64_t *k = reinterpret_cast<const int64_t*>(key);
+  const uint64_t array_pos = compute_pos(*k);
+  l >>= kValueLengthBits;
+  uint32_t pos = l;
+
+  auto &vs = hash_[array_pos];
+  kv_info *ptr;
+  auto ret = find(vs, has_sort_.test(array_pos), *k, &ptr);
+
+  if (ret == kNotFound) {
+    vs.emplace_back(*k, pos);
+    // broken the sorted list.
+    has_sort_.reset(array_pos);
+  } else {
+    ptr->offset_4k_ = pos;
+  }
+  return kSucc;
+}
+
+RetCode HashTreeTable::SetNoLock(const std::string &key, uint64_t l) {
+  return SetNoLock(key.c_str(), l);
+}
+
+#ifdef HASH_LOCK
 
 RetCode HashTreeTable::Set(const char *key, uint64_t l) {
   const int64_t *k = reinterpret_cast<const int64_t*>(key);
@@ -123,6 +178,7 @@ RetCode HashTreeTable::Set(const char *key, uint64_t l) {
 RetCode HashTreeTable::Set(const std::string &key, uint64_t l) {
   return Set(key.c_str(), l);
 }
+#endif
 
 void HashTreeTable::Sort() {
   // there are 64 thread.
@@ -285,6 +341,7 @@ void EngineRace::BuildHashTable() {
   // the other one insert the item into hash table.
   struct buffer_mgr {
     std::mutex free_lock;
+    std::condition_variable free_cond;
     std::vector<char*> free_buffers;
 
     std::mutex data_lock;
@@ -294,6 +351,9 @@ void EngineRace::BuildHashTable() {
     std::atomic<bool> read_over{false};
 
     buffer_mgr() {
+      for (uint64_t i = 0; i < 10; i++) {
+        free_buffers.push_back(GetAlignedBuffer(k16MB));
+      }
     }
 
     ~buffer_mgr() {
@@ -309,15 +369,7 @@ void EngineRace::BuildHashTable() {
 
     char *GetFreeBuffer() {
       std::unique_lock<std::mutex> l(free_lock);
-      if (free_buffers.empty()) {
-        DEBUG << "new 16MB memory\n";
-        char *buf = GetAlignedBuffer(k16MB);
-        if (!buf) {
-          DEBUG << "build hash table alloc failed\n";
-        }
-        return buf;
-      }
-
+      free_cond.wait(l, [&] { return free_buffers.size() > 0; });
       char *buf = free_buffers.back();
       free_buffers.pop_back();
       return buf;
@@ -326,6 +378,7 @@ void EngineRace::BuildHashTable() {
     void PutFreeBuffer(char *buf) {
       std::unique_lock<std::mutex> l(free_lock);
       free_buffers.push_back(buf);
+      free_cond.notify_one();
     }
 
     // must get from front buffer.
@@ -379,7 +432,7 @@ void EngineRace::BuildHashTable() {
         continue;
       }
       has_find_valid = true;
-      hash_.Set(ref->key, ref->pos);
+      hash_.SetNoLock(ref->key, ref->pos);
       max_data_offset_ = std::max(max_data_offset_, ref->pos);
     }
   };
@@ -465,7 +518,7 @@ void EngineRace::WriteEntry() {
     for (auto &x: vs) {
       // begin to insert all the items into HashTable.
       // may sort here, because the write may take some time.
-      hash_.Set(x->key->ToString().c_str(), old_pos);
+      hash_.SetNoLock(x->key->ToString().c_str(), old_pos);
       old_pos += kPageSize;
     }
 
@@ -562,9 +615,9 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     return kSucc;
   }
 
-  //        compute the position.
+  //  compute the position.
   uint64_t offset = 0;
-  RetCode ret = hash_.Get(key.ToString().c_str(), &offset);
+  RetCode ret = hash_.GetNoLock(key.ToString().c_str(), &offset);
   if (ret == kNotFound) {
     return ret;
   }

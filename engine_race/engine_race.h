@@ -42,10 +42,17 @@ class HashTreeTable {
  public:
   // note, l_bytes means the location in big file
   // related to bytes, not 4KB
+#ifdef HASH_LOCK
   RetCode Get(const std::string &key, uint64_t *l_bytes); // with_lock
   RetCode Set(const std::string &key, uint64_t l_bytes); // with_lock
   RetCode Get(const char* key, uint64_t *l_bytes); // with_lock
   RetCode Set(const char* key, uint64_t l_bytes); // with_lock
+#endif
+
+  RetCode GetNoLock(const std::string &key, uint64_t *l_bytes); // no_lock
+  RetCode SetNoLock(const std::string &key, uint64_t l_bytes); // no_lock
+  RetCode GetNoLock(const char* key, uint64_t *l_bytes); // no_lock
+  RetCode SetNoLock(const char* key, uint64_t l_bytes); // no_lock
 
   // NOTE: no lock here. Do not call it anywhere.
   // after load all the entries from disk,
@@ -61,14 +68,21 @@ class HashTreeTable {
   void PrintMeanStdDev();
 
  public:
+
+#ifdef HASH_LOCK
   HashTreeTable(): hash_lock_(kMaxBucketSize) {
+#else
+  HashTreeTable() {
+#endif
     hash_.resize(kMaxBucketSize);
   }
   ~HashTreeTable() { }
 
+#ifdef HASH_LOCK
  private:
   void LockHashShard(uint32_t index);
   void UnlockHashShard(uint32_t index);
+#endif
 
  public:
   HashTreeTable(const HashTreeTable &) = delete;
@@ -99,10 +113,12 @@ class HashTreeTable {
   };
   #pragma pack(pop)
   std::vector<std::vector<kv_info>> hash_;
+
+#ifdef HASH_LOCK
   std::vector<spinlock> hash_lock_;
+#endif
+
   std::bitset<kMaxBucketSize> has_sort_;
-  // the starting write pos of 4K data.
-  uint64_t next_write_pos_ = 0;
  private:
   uint32_t compute_pos(uint64_t key);
   RetCode find(std::vector<kv_info> &vs, bool sorted, uint64_t key, kv_info **ptr);
