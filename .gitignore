@@ -42,3 +42,11 @@ test/multi_req_1_thd_1000
 test/multi_req_1_thd_64
 test/no_cmp_read
 test/test_chrono
+test/aio_lib
+test/engine_race_test
+test/env_aio_test
+test/mock_build_hash
+test/old
+test/read_index
+test/single_test
+test/succ_test
