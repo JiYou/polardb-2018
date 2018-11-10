@@ -20,19 +20,18 @@ typedef enum io_iocb_cmd {
 	IO_CMD_FSYNC = 2,
 	IO_CMD_FDSYNC = 3,
 
-	IO_CMD_POLL = 5, /* Never implemented in mainline, see io_prep_poll */
+	IO_CMD_POLL = 5,
 	IO_CMD_NOOP = 6,
 	IO_CMD_PREADV = 7,
 	IO_CMD_PWRITEV = 8,
 } io_iocb_cmd_t;
 
-#define PADDED(x, y)	x, y
 #define PADDEDptr(x, y)	x
 #define PADDEDul(x, y)	unsigned long x
 
 struct io_iocb_poll {
-	PADDED(int events, __pad1);
-};	/* result code is the set of result flags or -'ve errno */
+	int events, __pad1;
+};
 
 struct io_iocb_sockaddr {
 	struct sockaddr *addr;
@@ -56,7 +55,7 @@ struct io_iocb_vector {
 
 struct iocb {
 	PADDEDptr(void *data, __pad1);	/* Return in the io completion event */
-	PADDED(unsigned key, __pad2);	/* For use in identifying io requests */
+	unsigned key, __pad2;
 
 	short		aio_lio_opcode;	
 	short		aio_reqprio;

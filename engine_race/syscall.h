@@ -1,16 +1,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#define _SYMSTR(str)	#str
-#define SYMSTR(str)	_SYMSTR(str)
-
-#define SYMVER(compat_sym, orig_sym, ver_sym)	\
-	__asm__(".symver " SYMSTR(compat_sym) "," SYMSTR(orig_sym) "@LIBAIO_" SYMSTR(ver_sym));
-
-#define DEFSYMVER(compat_sym, orig_sym, ver_sym)	\
-	__asm__(".symver " SYMSTR(compat_sym) "," SYMSTR(orig_sym) "@@LIBAIO_" SYMSTR(ver_sym));
-
-// define the linux kernel system-call for AIO
+// define the linux kernel system-call for engine_aio
 #ifndef __NR_io_setup
 #define __NR_io_setup		206
 #endif
