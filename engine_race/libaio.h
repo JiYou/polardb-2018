@@ -26,7 +26,6 @@ typedef enum io_iocb_cmd {
 	IO_CMD_PWRITEV = 8,
 } io_iocb_cmd_t;
 
-#define PADDEDptr(x, y)	x
 #define PADDEDul(x, y)	unsigned long x
 
 struct io_iocb_poll {
@@ -39,7 +38,7 @@ struct io_iocb_sockaddr {
 };	/* result code is the length of the sockaddr, or -'ve errno */
 
 struct io_iocb_common {
-	PADDEDptr(void	*buf, __pad1);
+  void *buf;
 	PADDEDul(nbytes, __pad2);
 	long long	offset;
 	long long	__pad3;
@@ -54,7 +53,7 @@ struct io_iocb_vector {
 };	/* result code is the amount read or -'ve errno */
 
 struct iocb {
-	PADDEDptr(void *data, __pad1);	/* Return in the io completion event */
+  void *data;
 	unsigned key, __pad2;
 
 	short		aio_lio_opcode;	
@@ -70,14 +69,13 @@ struct iocb {
 };
 
 struct io_event {
-	PADDEDptr(void *data, __pad1);
-	PADDEDptr(struct iocb *obj,  __pad2);
+  void *data;
+  struct iocb *obj;
 	PADDEDul(res,  __pad3);
 	PADDEDul(res2, __pad4);
 };
 
 #undef PADDED
-#undef PADDEDptr
 #undef PADDEDul
 
 typedef void (*io_callback_t)(io_context_t ctx, struct iocb *iocb, long res, long res2);
