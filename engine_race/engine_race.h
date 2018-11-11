@@ -127,8 +127,65 @@ class HashTreeTable {
   RetCode find(std::vector<kv_info> &vs, bool sorted, uint64_t key, kv_info **ptr);
 };
 
-// this struct does not manage file & buffer
+// aio just for read operations.
+struct aio_env_single_read {
+  aio_env_single_read(int fd_) {
+    fd = fd_;
+    // prepare the io context.
+    memset(&ctx, 0, sizeof(ctx));
+    if (io_setup(kSingleRequest, &ctx) < 0) {
+      DEBUG << "Error in io_setup" << std::endl;
+    }
+
+    timeout.tv_sec = 0;
+    timeout.tv_nsec = 0;
+
+    memset(&iocb, 0, sizeof(iocb));
+    iocbs = &iocb;
+    iocb.aio_lio_opcode = IO_CMD_PREAD;
+    iocb.aio_reqprio = 0;
+    iocb.u.c.nbytes = kPageSize;
+    iocb.aio_fildes = fd;
+  }
+
+  void PrepareRead(uint64_t offset, char *out, uint32_t size) {
+    // iocb.aio_fildes = fd;
+    iocb.u.c.offset = offset;
+    iocb.u.c.buf = out;
+    // iocb.u.c.nbytes = size;
+    // iocb.aio_lio_opcode = IO_CMD_PREAD;
+  }
+
+  RetCode Submit() {
+    if ((io_submit(ctx, kSingleRequest, &iocbs)) != kSingleRequest) {
+      DEBUG << "io_submit meet error, " << std::endl;;
+      return kIOError;
+    }
+    return kSucc;
+  }
+
+  void WaitOver() {
+    // after submit, need to wait all read over.
+    while (io_getevents(ctx, kSingleRequest, kSingleRequest,
+                        &events, &(timeout)) != kSingleRequest) {
+      /**/
+    }
+  }
+
+  ~aio_env_single_read() {
+    io_destroy(ctx);
+  }
+
+  int fd = 0;
+  io_context_t ctx;
+  struct iocb iocb;
+  struct iocb* iocbs;
+  struct io_event events;
+  struct timespec timeout;
+};
+
 // 2 AIO context
+// this is just used in write operations.
 struct aio_env_two {
 
   static constexpr int two_event = 2;
@@ -252,6 +309,7 @@ struct aio_env_two {
 // io_.Submit();
 // io_.WaitOver();
 // io_.Clear();
+// this is just used in read read queue operations.
 struct aio_env {
 
   void SetFD(int fd_) {

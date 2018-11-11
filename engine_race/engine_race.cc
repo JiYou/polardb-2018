@@ -773,7 +773,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
 
     hash_.Sort();
-    hash_.PrintMeanStdDev();
+    //hash_.PrintMeanStdDev();
   });
 
 #ifdef READ_QUEUE
@@ -783,6 +783,56 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
 #ifdef USE_MAP
   return ReadUseMap(key, value);
 #endif
+
+  // read the content parallel.
+  // just give pos,buf to read queue.
+  struct local_buf_read {
+    char *buf = nullptr;
+    local_buf_read() {
+      buf = GetAlignedBuffer(kPageSize); // just 1 MB for every thread as cache.
+    }
+    ~local_buf_read() {
+      free(buf);
+    }
+  };
+
+  static thread_local struct local_buf_read lb;
+  // cache strategy. Just cache the found items.
+  // all the not found item
+  // need to search in the hash.
+  // TODO: design a bloom filter?
+  static thread_local bool has_read = false;
+  static thread_local uint64_t pre_key = 0;
+  static thread_local struct aio_env_single_read raio(fd_);
+
+  // opt 1. hit the pre-key?
+  //       . no need to compute the position with hash.
+  const uint64_t *new_key = reinterpret_cast<const uint64_t*>(key.ToString().c_str());
+  if (has_read && pre_key == *new_key) {
+    // just copy the buffer.
+    value->assign(lb.buf, kPageSize);
+    return kSucc;
+  }
+
+  //  compute the position.
+  uint64_t offset = 0;
+  RetCode ret = hash_.GetNoLock(key.ToString().c_str(), &offset);
+  if (ret == kNotFound) {
+    return ret;
+  }
+
+  // NOTE: update the cache.
+  // udpate the cache.
+  pre_key = *new_key;
+  has_read = true;
+
+  raio.PrepareRead(offset, lb.buf, kPageSize);
+  raio.Submit();
+  raio.WaitOver();
+
+  value->assign(lb.buf, kPageSize);
+  return kSucc;
+
 }
 
 RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
