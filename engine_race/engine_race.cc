@@ -768,9 +768,11 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   std::call_once (init_mptr, [this] {
     BEGIN_POINT(begin_build_hash_table);
     BuildHashTable();
-    hash_.Sort();
     END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
-    //hash_.PrintMeanStdDev();
+
+    BEGIN_POINT(begin_sort_hash_table);
+    hash_.Sort();
+    END_POINT(end_sort_hash_table, begin_sort_hash_table, "hash_sort_time");
   });
 
 #ifdef READ_QUEUE
@@ -811,21 +813,29 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     return kSucc;
   }
 
+#ifdef PERF_COUNT
   //  compute the position.
   static thread_local uint64_t hash_look_time_sum = 0;
   static thread_local uint64_t hash_item_cnt = 0;
   auto hash_start_time = std::chrono::system_clock::now();
+#endif
 
   uint64_t offset = 0;
   RetCode ret = hash_.GetNoLock(key.ToString().c_str(), &offset);
 
-  auto hash_end_time = std::chrono::system_clock::now();
-  auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(hash_end_time - hash_start_time);
-  hash_item_cnt++;
-  hash_look_time_sum += diff.count();
-  if (hash_item_cnt % 200000 == 0) {
-    std::cout << "hash_time: " << hash_item_cnt << " , " << hash_look_time_sum / 1000 << "micro second" << std::endl;
+#ifdef PERF_COUNT
+  {
+    auto hash_end_time = std::chrono::system_clock::now();
+    auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(hash_end_time - hash_start_time);
+    hash_item_cnt++;
+    hash_look_time_sum += diff.count();
+    if (hash_item_cnt % 500000 == 0) {
+      std::cout << "hash_time: " << hash_item_cnt
+                << " , " << hash_look_time_sum / 1000
+                << "micro second" << std::endl;
+    }
   }
+#endif
 
   if (ret == kNotFound) {
     return ret;
@@ -836,20 +846,43 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   pre_key = *new_key;
   has_read = true;
 
+#ifdef PERF_COUNT
   static thread_local uint64_t disk_read_time_sum = 0;
   auto disk_start_time = std::chrono::system_clock::now();
+#endif
 
   raio.PrepareRead(offset, lb.buf, kPageSize);
   raio.Submit();
   raio.WaitOver();
-  value->assign(lb.buf, kPageSize);
 
+#ifdef PERF_COUNT
   auto disk_end_time = std::chrono::system_clock::now();
   auto disk_diff = std::chrono::duration_cast<std::chrono::nanoseconds>(disk_end_time - disk_start_time);
-  disk_read_time_sum += diff.count();
-  if (hash_item_cnt % 200000 == 0) {
-    std::cout << "disk_time: " << hash_item_cnt << " , " << disk_read_time_sum / 1000 << "micro second" << std::endl;
+  disk_read_time_sum += disk_diff.count();
+  if (hash_item_cnt % 500000 == 0) {
+    std::cout << "disk_time: " << hash_item_cnt << " , "
+              << disk_read_time_sum / 1000
+              << "micro second" << std::endl;
   }
+#endif
+
+  value->assign(lb.buf, kPageSize);
+
+
+#ifdef PERF_COUNT
+  static thread_local uint64_t copy_time_sum = 0;
+  auto copy_end_time = std::chrono::system_clock::now();
+  auto copy_diff = std::chrono::duration_cast<std::chrono::nanoseconds>(copy_end_time - disk_end_time);
+  copy_time_sum += copy_diff.count();
+  if (hash_item_cnt % 500000 == 0) {
+    std::cout << "copy_time: " << hash_item_cnt << " , "
+              << copy_time_sum / 1000
+              << "micro second" << std::endl;
+  }
+#endif
+
+
+
   return kSucc;
 }
 
