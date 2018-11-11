@@ -80,7 +80,12 @@ RetCode HashTreeTable::GetNoLock(const char* key, uint64_t *l) {
   // then begin to search this array.
   auto &vs = hash_[array_pos];
   kv_info *ptr = nullptr;
+
+#ifdef HASH_LOCK
   auto ret = find(vs, has_sort_.test(array_pos), *k, &ptr);
+#else
+  auto ret = find(vs, true, *k, &ptr);
+#endif
 
   if (ret == kNotFound) {
     return kNotFound;
@@ -135,12 +140,19 @@ RetCode HashTreeTable::SetNoLock(const char *key, uint64_t l) {
 
   auto &vs = hash_[array_pos];
   kv_info *ptr;
+
+#ifdef HASH_LOCK
   auto ret = find(vs, has_sort_.test(array_pos), *k, &ptr);
+#else
+  auto ret = find(vs, true, *k, &ptr);
+#endif
 
   if (ret == kNotFound) {
     vs.emplace_back(*k, pos);
     // broken the sorted list.
+#ifdef HASH_LOCK
     has_sort_.reset(array_pos);
+#endif
   } else {
     ptr->offset_4k_ = pos;
   }
@@ -191,10 +203,12 @@ void HashTreeTable::Sort() {
     }
   };
 
+#ifdef HASH_LOCK
   auto set_all_sorted = [this]() {
       has_sort_.set();
   };
   std::thread set_sort_bit(set_all_sorted);
+#endif
 
   std::vector<std::thread> thread_list;
   constexpr int segment_size = 104355;
@@ -207,7 +221,10 @@ void HashTreeTable::Sort() {
   for (auto &x: thread_list) {
     x.join();
   }
+
+#ifdef HASH_LOCK
   set_sort_bit.join();
+#endif
 }
 
 void HashTreeTable::PrintMeanStdDev() {

@@ -119,9 +119,9 @@ class HashTreeTable {
 
 #ifdef HASH_LOCK
   std::vector<spinlock> hash_lock_;
+  std::bitset<kMaxBucketSize> has_sort_;
 #endif
 
-  std::bitset<kMaxBucketSize> has_sort_;
  private:
   uint32_t compute_pos(uint64_t key);
   RetCode find(std::vector<kv_info> &vs, bool sorted, uint64_t key, kv_info **ptr);
