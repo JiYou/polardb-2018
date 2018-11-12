@@ -109,7 +109,6 @@ all: $(LIBRARY)
 dbg: $(LIBRARY)
 
 $(LIBRARY):
-	./show_numa
 	$(AM_V_at)make -C $(SUB_PATH) DEBUG_LEVEL=$(DEBUG_LEVEL) LIBOUTPUT=$(LIBOUTPUT) EXEC_DIR=$(CURDIR)
 	
 clean:
