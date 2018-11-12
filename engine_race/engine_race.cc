@@ -552,18 +552,29 @@ void EngineRace::WriteEntry() {
   DEBUG << "db::WriteEntry()" << std::endl;
   uint64_t empty_key = 0;
 
-  while (!stop_) {
-    write_queue_.Pop(&vs);
+  // JIYOU -- begin
+  uint64_t pop_time_sum = 0;
+  uint64_t wait_io_sum = 0;
+  uint64_t set_mem_sum = 0;
+  uint64_t sub_io_sum = 0;
+  uint64_t feed_back_sum = 0;
+  uint64_t put_time_sum = 0;
+  uint64_t cnt = 0;
 
+  while (!stop_) {
+    auto pop_start_time = std::chrono::system_clock::now();
+    write_queue_.Pop(&vs);
+    cnt += vs.size();
     // get free aio
+    auto wait_start_time = std::chrono::system_clock::now();
     auto aio = mgr.GetFreeAIO();
     if (!aio) {
       break;
     }
 
+    auto copy_start_time = std::chrono::system_clock::now();
     struct disk_index *di = reinterpret_cast<struct disk_index*>(aio->index_buf);
     char *to = aio->data_buf;
-
     for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
       if (i < vs.size()) {
         auto &x = vs[i];
@@ -581,52 +592,45 @@ void EngineRace::WriteEntry() {
       }
     }
 
+    auto sub_start_time = std::chrono::system_clock::now();
     uint32_t data_write_size = vs.size() << 12;
     aio->Clear();
     aio->PrepareWrite(max_index_offset_, aio->index_buf, k1KB);
     aio->PrepareWrite(max_data_offset_, aio->data_buf, data_write_size);
     aio->Submit();
-
-    mgr.PutDataAIO(aio);
-    // then you can do something here usefull. instead of waiting the disk write over.
-    // ==================
-    // BEGIN of co-task
-
-    // update the hash table at the same time.
-    // ***********************************************************
-    // NOTE: because the write/read is split
-    // So, there no need to update the hash table.
-    // If read happen, it would load the hash table from disk.
-    // this will save the memory for write process
-    // and speed up the write process.
-    // **********************************************************
-    /*
-    uint64_t old_pos = max_data_offset_;
-    for (auto &x: vs) {
-      // begin to insert all the items into HashTable.
-      // may sort here, because the write may take some time.
-      hash_.SetNoLock(x->key->ToString().c_str(), old_pos);
-      old_pos += kPageSize;
-    }
-    */
-
     max_index_offset_ += k1KB;
     max_data_offset_ += data_write_size;
-    // ==================
-    // END of co-task
 
-    //write_aio_.WaitOver(); // would stuck here.
-
-    // ack all the writers.
+    auto feed_start_time = std::chrono::system_clock::now();
     for (auto &x: vs) {
       x->feed_back();
     }
-  }
 
+    auto put_start_time = std::chrono::system_clock::now();
+    mgr.PutDataAIO(aio);
+    auto end_time = std::chrono::system_clock::now();
+
+    #define DEL(x,y) (std::chrono::duration_cast<std::chrono::nanoseconds>(x - y)).count()
+    pop_time_sum += DEL(wait_start_time, pop_start_time);
+    wait_io_sum += DEL(copy_start_time, wait_start_time);
+    set_mem_sum += DEL(sub_start_time, copy_start_time);
+    sub_io_sum += DEL(feed_start_time, sub_start_time);
+    feed_back_sum += DEL(put_start_time, feed_start_time);
+    put_time_sum += DEL(end_time,  put_start_time);
+    if (cnt == 64000000ull) {
+      std::cout << "pop_time_sum = " << pop_time_sum / 1000 << std::endl
+                << "wait_io_sum = " <<  wait_io_sum / 1000 << std::endl
+                << "set_mem_sum = " << set_mem_sum / 1000 << std::endl
+                << "sub_io_sum = " << sub_io_sum / 1000 << std::endl
+                << "feed_back_sum = " << feed_back_sum / 1000 << std::endl
+                << "put_time_sum = " << put_time_sum / 1000 << std::endl;
+    }
+    if (cnt % 1000000 == 0) {
+      printf("+\n");
+    }
+  }
   mgr.game_over = true;
   thd_wait_aio.join();
-
-
 }
 
 void EngineRace::start_write_thread() {
@@ -659,7 +663,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     if (rc != 0) {
       std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
     }
-    std::cout << "Thread #" << std::this_thread::get_id() << ": on CPU " << sched_getcpu() << "\n";
   }
 
   // TODO: add write cache hit system ?
@@ -699,7 +702,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     if (rc != 0) {
       std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
     }
-    std::cout << "Thread #" << std::this_thread::get_id() << ": on CPU " << sched_getcpu() << "\n";
   }
 
   // read the content parallel.
@@ -716,6 +718,11 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
 
   static thread_local struct local_buf_read lb;
   static thread_local struct aio_env_single_read raio(fd_);
+  static thread_local uint64_t cnt= 0;
+  cnt++;
+  if (cnt % 500000 == 0) {
+    printf(".\n");
+  }
   uint64_t offset = 0;
   RetCode ret = hash_.GetNoLock(key.ToString().c_str(), &offset);
   if (ret == kNotFound) {
