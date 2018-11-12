@@ -640,7 +640,7 @@ void EngineRace::WriteEntry() {
     auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(wait_end_time - wait_start_time);
     write_item_cnt += vs.size();
     wait_io_context_time += diff.count();
-    if (write_item_cnt % 500000 < 3) {
+    if (write_item_cnt % 1000000 < 3) {
       std::cout << "wait_io_time: " << write_item_cnt
                 << " , " << wait_io_context_time / 1000
                 << "micro second" << std::endl;
@@ -919,8 +919,34 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   auto hash_start_time = std::chrono::system_clock::now();
 #endif
 
+  // JIYOU--begin
+  static thread_local uint64_t pre_offset = 0;
+  static thread_local int cnt[1024] = {0};
+  // JIYOU --end
+
   uint64_t offset = 0;
   RetCode ret = hash_.GetNoLock(key.ToString().c_str(), &offset);
+
+  // JIYOU -0- begin
+  auto dist = pre_offset > offset ? pre_offset - offset : offset - pre_offset;
+  if (dist < 1024) {
+    cnt[dist]++;
+  }
+  pre_offset = offset;
+  if (hash_item_cnt % 1000000 == 0) {
+    bool has_find = false;
+    for (int i = 0; i < 1024; i++) {
+      if (cnt[i] > 0) {
+        if (!has_find) {
+          std::cout << "pos ";
+          has_find = true;
+        }
+        std::cout << i << " :: " << cnt[i] << " ,";
+      }
+    }
+    std::cout << std::endl;
+  }
+  // JIYOU -- end
 
 #ifdef PERF_COUNT
   {
@@ -928,7 +954,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(hash_end_time - hash_start_time);
     hash_item_cnt++;
     hash_look_time_sum += diff.count();
-    if (hash_item_cnt % 500000 == 0) {
+    if (hash_item_cnt % 1000000 == 0) {
       std::cout << "hash_time: " << hash_item_cnt
                 << " , " << hash_look_time_sum / 1000
                 << "micro second" << std::endl;
