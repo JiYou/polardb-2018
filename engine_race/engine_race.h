@@ -54,6 +54,12 @@ class HashTreeTable {
   RetCode GetNoLock(const char* key, uint64_t *l_bytes); // no_lock
   RetCode SetNoLock(const char* key, uint64_t l_bytes); // no_lock
 
+  // if find the key, value += 1
+  // if not find the key, value = 1.
+  // use the value as counter.
+  RetCode AddOrUpdateCount(const uint64_t key);
+  void TopK(uint64_t k);
+
   // NOTE: no lock here. Do not call it anywhere.
   // after load all the entries from disk,
   // for speed up the lookup, need to sort it.
@@ -70,6 +76,7 @@ class HashTreeTable {
  public:
 
   void Init() {
+    hash_.clear();
     hash_.resize(kMaxBucketSize);
   }
 
@@ -484,7 +491,7 @@ class EngineRace : public Engine  {
   }
 #endif
 
-  ~EngineRace();
+  virtual ~EngineRace();
 
   RetCode Write(const PolarString& key,
       const PolarString& value) override;
@@ -505,6 +512,8 @@ class EngineRace : public Engine  {
   RetCode  ReadUseQueue(const PolarString& key, std::string *value);
 #endif
 
+
+  bool has_start_write = false;
   void start_write_thread();
 
 #ifdef READ_QUEUE

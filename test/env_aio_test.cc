@@ -23,7 +23,6 @@
 #include <iostream>
 
 #define LOG(x) std::cout
-#define DEBUG std::cerr<<__FILE__<<":"<<__LINE__<<":"<<__FUNCTION__<<"()"<<"msg="<<strerror(errno)
 
 namespace polar_race {
 // begin of namespace polar_race

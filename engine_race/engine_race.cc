@@ -3,6 +3,7 @@
 #include "util.h"
 #include "engine_race.h"
 #include "engine_aio.h"
+#include "engine_hash.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -17,6 +18,7 @@
 #include <chrono>
 #include <atomic>
 #include <algorithm>
+#include <set>
 
 namespace polar_race {
 
@@ -131,6 +133,53 @@ RetCode HashTreeTable::Get(const std::string &key, uint64_t *l) {
   return Get(key.c_str(), l);
 }
 #endif
+
+RetCode HashTreeTable::AddOrUpdateCount(const uint64_t key) {
+  const uint64_t array_pos = compute_pos(key);
+  auto &vs = hash_[array_pos];
+  kv_info *ptr;
+
+#ifdef HASH_LOCK
+  auto ret = find(vs, has_sort_.test(array_pos), key, &ptr);
+#else
+  auto ret = find(vs, true, key, &ptr);
+#endif
+
+  if (ret == kNotFound) {
+    vs.emplace_back(key, 1);
+    // broken the sorted list.
+#ifdef HASH_LOCK
+    has_sort_.reset(array_pos);
+#endif
+  } else {
+    ptr->offset_4k_+= 1; //use offset_4k_ as counter.
+  }
+  return kSucc;
+}
+
+void HashTreeTable::TopK(uint64_t k) {
+  struct intCmp {
+    bool operator()(const kv_info &a, const kv_info &b) const {
+      return a.offset_4k_ < b.offset_4k_;
+    }
+  };
+  std::set<kv_info, intCmp> topk;
+  // scan every shard
+  for (auto &shard: hash_) {
+    for (auto &x: shard) {
+      topk.insert(x);
+      if (topk.size() > k) {
+        topk.erase(topk.begin());
+      }
+    }
+  }
+
+  // print the top k information.
+  for (auto &x: topk) {
+    if (x.offset_4k_ <= 2) continue;
+    std::cout << "topk: " << x.key << " : " << x.offset_4k_ << std::endl;
+  }
+}
 
 RetCode HashTreeTable::SetNoLock(const char *key, uint64_t l) {
   const int64_t *k = reinterpret_cast<const int64_t*>(key);
@@ -462,9 +511,16 @@ EngineRace::~EngineRace() {
   }
 
   // to join the read/write thread?
+  if (has_start_write) {
+    // JIYOU --begin
+    std::cout << "Begin print topK" << std::endl;
+    hash_.TopK(kPageSize);
+    // JIYOU --end
+  }
 }
 
 void EngineRace::WriteEntry() {
+  has_start_write = true;
   // there are two threads here.
   // one is just flush the io into disks
   // after submit, then it return to client.
@@ -549,14 +605,42 @@ void EngineRace::WriteEntry() {
   DEBUG << "db::WriteEntry()" << std::endl;
   uint64_t empty_key = 0;
 
+  // JIYOU --begin
+  hash_.Init();
+  // JIYOU --end
+
+#ifdef PERF_COUNT
+  uint64_t wait_io_context_time = 0;
+  uint64_t write_item_cnt = 0;
+#endif
+
   while (!stop_) {
     write_queue_.Pop(&vs);
+
+#ifdef PERF_COUNT
+    //  compute the position.
+    auto wait_start_time = std::chrono::system_clock::now();
+#endif
 
     // get free aio
     auto aio = mgr.GetFreeAIO();
     if (!aio) {
       break;
     }
+
+#ifdef PERF_COUNT
+  {
+    auto wait_end_time = std::chrono::system_clock::now();
+    auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(wait_end_time - wait_start_time);
+    write_item_cnt += vs.size();
+    wait_io_context_time += diff.count();
+    if (write_item_cnt % 500000 < 3) {
+      std::cout << "wait_io_time: " << write_item_cnt
+                << " , " << wait_io_context_time / 1000
+                << "micro second" << std::endl;
+    }
+  }
+#endif
 
     struct disk_index *di = reinterpret_cast<struct disk_index*>(aio->index_buf);
     char *to = aio->data_buf;
@@ -570,6 +654,13 @@ void EngineRace::WriteEntry() {
         di->pos = max_data_offset_ + (i<<kValueLengthBits);
         di++;
         memcpy(to, x->value->ToString().c_str(), kPageSize);
+
+        // JIYOU --begin
+        // to detect the value is duplicated or not?
+        uint64_t hash_value = farmhash64(to, kPageSize);
+        hash_.AddOrUpdateCount(hash_value);
+        // JIYOU --end
+
         to += kPageSize;
       } else {
         di->SetKey(&empty_key);
@@ -622,6 +713,8 @@ void EngineRace::WriteEntry() {
 
   mgr.game_over = true;
   thd_wait_aio.join();
+
+
 }
 
 #ifdef READ_QUEUE
@@ -880,8 +973,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
               << "micro second" << std::endl;
   }
 #endif
-
-
 
   return kSucc;
 }

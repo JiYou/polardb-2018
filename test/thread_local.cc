@@ -16,7 +16,7 @@ class TestThreadLocal {
         printf("alloc success\n");
       }
     }
-    printf("%lu\n", buf);
+    printf("%llu\n", (unsigned long long)buf);
   }
 };
 
