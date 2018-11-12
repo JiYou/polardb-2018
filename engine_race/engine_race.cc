@@ -164,9 +164,14 @@ void HashTreeTable::TopK(uint64_t k) {
     }
   };
   std::set<kv_info, intCmp> topk;
+
+  uint64_t conflict_count = 0;
   // scan every shard
   for (auto &shard: hash_) {
     for (auto &x: shard) {
+      if (x.offset_4k_ >= 2) {
+        conflict_count++;
+      }
       topk.insert(x);
       if (topk.size() > k) {
         topk.erase(topk.begin());
@@ -174,6 +179,7 @@ void HashTreeTable::TopK(uint64_t k) {
     }
   }
 
+  std::cout << "conflict_count = " << conflict_count << std::endl;
   // print the top k information.
   for (auto &x: topk) {
     if (x.offset_4k_ <= 2) continue;
