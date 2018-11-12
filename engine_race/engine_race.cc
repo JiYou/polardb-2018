@@ -5,6 +5,7 @@
 #include "engine_aio.h"
 #include "engine_hash.h"
 
+#include <pthread.h>
 #include <assert.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -134,58 +135,6 @@ RetCode HashTreeTable::Get(const std::string &key, uint64_t *l) {
 }
 #endif
 
-RetCode HashTreeTable::AddOrUpdateCount(const uint64_t key) {
-  const uint64_t array_pos = compute_pos(key);
-  auto &vs = hash_[array_pos];
-  kv_info *ptr;
-
-#ifdef HASH_LOCK
-  auto ret = find(vs, has_sort_.test(array_pos), key, &ptr);
-#else
-  auto ret = find(vs, true, key, &ptr);
-#endif
-
-  if (ret == kNotFound) {
-    vs.emplace_back(key, 1);
-    // broken the sorted list.
-#ifdef HASH_LOCK
-    has_sort_.reset(array_pos);
-#endif
-  } else {
-    ptr->offset_4k_+= 1; //use offset_4k_ as counter.
-  }
-  return kSucc;
-}
-
-void HashTreeTable::TopK(uint64_t k) {
-  struct intCmp {
-    bool operator()(const kv_info &a, const kv_info &b) const {
-      return a.offset_4k_ < b.offset_4k_;
-    }
-  };
-  std::set<kv_info, intCmp> topk;
-
-  uint64_t conflict_count = 0;
-  // scan every shard
-  for (auto &shard: hash_) {
-    for (auto &x: shard) {
-      if (x.offset_4k_ >= 2) {
-        conflict_count++;
-      }
-      topk.insert(x);
-      if (topk.size() > k) {
-        topk.erase(topk.begin());
-      }
-    }
-  }
-
-  std::cout << "conflict_count = " << conflict_count << std::endl;
-  // print the top k information.
-  for (auto &x: topk) {
-    if (x.offset_4k_ <= 2) continue;
-    std::cout << "topk: " << x.key << " : " << x.offset_4k_ << std::endl;
-  }
-}
 
 RetCode HashTreeTable::SetNoLock(const char *key, uint64_t l) {
   const int64_t *k = reinterpret_cast<const int64_t*>(key);
@@ -348,7 +297,7 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
       }
     }
     // init the aio env
-    engine_race->write_aio_.SetFD(engine_race->fd_);
+    // engine_race->write_aio_.SetFD(engine_race->fd_);
     engine_race->read_aio_.SetFD(engine_race->fd_);
   };
   std::thread thd_create_big_file(create_big_file);
@@ -376,6 +325,7 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   if (!new_db) {
   }
 
+  engine_race->max_cpu_cnt_ = std::thread::hardware_concurrency();
   *eptr = engine_race;
 
   return kSucc;
@@ -515,18 +465,9 @@ EngineRace::~EngineRace() {
   if (-1 != fd_) {
     close(fd_);
   }
-
-  // to join the read/write thread?
-  if (has_start_write) {
-    // JIYOU --begin
-    std::cout << "Begin print topK" << std::endl;
-    hash_.TopK(kPageSize);
-    // JIYOU --end
-  }
 }
 
 void EngineRace::WriteEntry() {
-  has_start_write = true;
   // there are two threads here.
   // one is just flush the io into disks
   // after submit, then it return to client.
@@ -611,42 +552,14 @@ void EngineRace::WriteEntry() {
   DEBUG << "db::WriteEntry()" << std::endl;
   uint64_t empty_key = 0;
 
-  // JIYOU --begin
-  hash_.Init();
-  // JIYOU --end
-
-#ifdef PERF_COUNT
-  uint64_t wait_io_context_time = 0;
-  uint64_t write_item_cnt = 0;
-#endif
-
   while (!stop_) {
     write_queue_.Pop(&vs);
-
-#ifdef PERF_COUNT
-    //  compute the position.
-    auto wait_start_time = std::chrono::system_clock::now();
-#endif
 
     // get free aio
     auto aio = mgr.GetFreeAIO();
     if (!aio) {
       break;
     }
-
-#ifdef PERF_COUNT
-  {
-    auto wait_end_time = std::chrono::system_clock::now();
-    auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(wait_end_time - wait_start_time);
-    write_item_cnt += vs.size();
-    wait_io_context_time += diff.count();
-    if (write_item_cnt % 1000000 < 3) {
-      std::cout << "wait_io_time: " << write_item_cnt
-                << " , " << wait_io_context_time / 1000
-                << "micro second" << std::endl;
-    }
-  }
-#endif
 
     struct disk_index *di = reinterpret_cast<struct disk_index*>(aio->index_buf);
     char *to = aio->data_buf;
@@ -660,13 +573,6 @@ void EngineRace::WriteEntry() {
         di->pos = max_data_offset_ + (i<<kValueLengthBits);
         di++;
         memcpy(to, x->value->ToString().c_str(), kPageSize);
-
-        // JIYOU --begin
-        // to detect the value is duplicated or not?
-        uint64_t hash_value = farmhash64(to, kPageSize);
-        hash_.AddOrUpdateCount(hash_value);
-        // JIYOU --end
-
         to += kPageSize;
       } else {
         di->SetKey(&empty_key);
@@ -723,46 +629,39 @@ void EngineRace::WriteEntry() {
 
 }
 
-#ifdef READ_QUEUE
-void EngineRace::ReadEntry() {
-  std::vector<read_item*> to_read(kMaxThreadNumber, nullptr);
-  std::vector<uint64_t> file_pos(kMaxThreadNumber, 0);
-  DEBUG << "db::ReadEntry()" << std::endl;
-
-  while (!stop_) {
-    read_queue_.Pop(&to_read);
-    read_aio_.Clear();
-    for (auto &x: to_read) {
-      x->buf[0] = 0;
-      assert (x->pos >= kMaxIndexSize);
-      read_aio_.PrepareRead(x->pos, x->buf, kPageSize, x);
-    }
-    read_aio_.Submit();
-    read_aio_.WaitOver(); // it will call the call back function.
-  }
-}
-#endif
-
 void EngineRace::start_write_thread() {
   static std::once_flag initialized_write;
   std::call_once (initialized_write, [this] {
-    std::thread write_thread_(&EngineRace::WriteEntry, this);
-    write_thread_.detach();
+    std::thread write_thread(&EngineRace::WriteEntry, this);
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(0, &cpuset);
+    auto thread_pid = write_thread.native_handle();
+    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    }
+    write_thread.detach();
   });
 }
-
-#ifdef READ_QUEUE
-void EngineRace::start_read_thread() {
-  static std::once_flag initialized_read;
-  std::call_once (initialized_read, [this] {
-    std::thread read_thread_(&EngineRace::ReadEntry, this);
-    read_thread_.detach();
-  });
-}
-#endif
 
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   start_write_thread();
+
+  static thread_local uint64_t m_cpu_id = 0xffff;
+  if (m_cpu_id == 0xffff) {
+    auto thread_pid = pthread_self();
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    m_cpu_id = cpu_id_++;
+    CPU_SET(m_cpu_id % max_cpu_cnt_, &cpuset);
+    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    }
+    std::cout << "Thread #" << std::this_thread::get_id() << ": on CPU " << sched_getcpu() << "\n";
+  }
+
   // TODO: add write cache hit system ?
   // if hit the previous value.
   write_item w(&key, &value);
@@ -773,91 +672,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   w.cond_.wait(l, [&w] { return w.is_done; });
   return w.ret_code;
 }
-
-#ifdef USE_MAP
-RetCode EngineRace::ReadUseMap(const PolarString& key, std::string *value) {
-  {
-    // init the read map.
-    static std::once_flag init_mptr;
-    std::call_once (init_mptr, [] {
-      mptr_ = mmap(NULL,
-                      kBigFileSize,
-                      PROT_READ,
-                      MAP_SHARED | MAP_HUGE_1GB | MAP_NONBLOCK | MAP_POPULATE,
-                      fd_,
-                      kMaxIndexSize);
-      if (mptr_ == MAP_FAILED) {
-        DEBUG << "mmap for read failed\n";
-      }
-    });
-  }
-}
-#endif
-
-#ifdef READ_QUEUE
-RetCode EngineRace::ReadUseQueue(const PolarString& key, std::string *value) {
-  start_read_thread();
-
-  // compute the position.
-  // just give pos,buf to read queue.
-  struct local_buf {
-    char *buf = nullptr;
-    local_buf() {
-      buf = GetAlignedBuffer(kPageSize); // just 1 MB for every thread as cache.
-    }
-    ~local_buf() {
-      free(buf);
-    }
-  };
-
-  static thread_local struct local_buf lb;
-  // cache strategy. Just cache the found items.
-  // all the not found item
-  // need to search in the hash.
-  // TODO: design a bloom filter?
-  static thread_local bool has_read = false;
-  static thread_local uint64_t pre_key = 0;
-
-  value->resize(kPageSize);
-  // opt 1. hit the pre-key?
-  //       . no need to compute the position with hash.
-  const uint64_t *new_key = reinterpret_cast<const uint64_t*>(key.ToString().c_str());
-  if (has_read && pre_key == *new_key) {
-    // just copy the buffer.
-    char *tob = const_cast<char*>(value->c_str());
-    char *fob = lb.buf;
-    //engine_memcpy(tob, fob);
-    memcpy(tob, fob, kPageSize);
-    return kSucc;
-  }
-
-  //  compute the position.
-  uint64_t offset = 0;
-  RetCode ret = hash_.GetNoLock(key.ToString().c_str(), &offset);
-  if (ret == kNotFound) {
-    return ret;
-  }
-
-  // NOTE: update the cache.
-  // udpate the cache.
-  pre_key = *new_key;
-  has_read = true;
-
-  read_item r(offset, lb.buf);
-  read_queue_.Push(&r);
-
-  std::unique_lock<std::mutex> l(r.lock_);
-  r.cond_.wait(l, [&r] { return r.is_done; });
-
-  // copy the buffer
-  char *new_buf = lb.buf;
-  char *target_buf = const_cast<char*>(value->c_str());
-  // engine_memcpy(target_buf, new_buf);
-  memcpy(target_buf, new_buf, kPageSize);
-  return r.ret_code;
-
-}
-#endif
 
 // for 64 read threads, it would take 64MB as cache read.
 RetCode EngineRace::Read(const PolarString& key, std::string* value) {
@@ -874,13 +688,19 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     END_POINT(end_sort_hash_table, begin_sort_hash_table, "hash_sort_time");
   });
 
-#ifdef READ_QUEUE
-  return ReadUseQueue(key, value);
-#endif
-
-#ifdef USE_MAP
-  return ReadUseMap(key, value);
-#endif
+  static thread_local uint64_t m_cpu_id = 0xffff;
+  if (m_cpu_id == 0xffff) {
+    auto thread_pid = pthread_self();
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    m_cpu_id = cpu_id_++;
+    CPU_SET(m_cpu_id % max_cpu_cnt_, &cpuset);
+    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    }
+    std::cout << "Thread #" << std::this_thread::get_id() << ": on CPU " << sched_getcpu() << "\n";
+  }
 
   // read the content parallel.
   // just give pos,buf to read queue.
@@ -895,117 +715,17 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   };
 
   static thread_local struct local_buf_read lb;
-  // cache strategy. Just cache the found items.
-  // all the not found item
-  // need to search in the hash.
-  // TODO: design a bloom filter?
-  static thread_local bool has_read = false;
-  static thread_local uint64_t pre_key = 0;
   static thread_local struct aio_env_single_read raio(fd_);
-
-  // opt 1. hit the pre-key?
-  //       . no need to compute the position with hash.
-  const uint64_t *new_key = reinterpret_cast<const uint64_t*>(key.ToString().c_str());
-  if (has_read && pre_key == *new_key) {
-    // just copy the buffer.
-    value->assign(lb.buf, kPageSize);
-    return kSucc;
-  }
-
-#ifdef PERF_COUNT
-  //  compute the position.
-  static thread_local uint64_t hash_look_time_sum = 0;
-  static thread_local uint64_t hash_item_cnt = 0;
-  auto hash_start_time = std::chrono::system_clock::now();
-#endif
-
-  // JIYOU--begin
-  static thread_local uint64_t pre_offset = 0;
-  static thread_local int cnt[1024] = {0};
-  // JIYOU --end
-
   uint64_t offset = 0;
   RetCode ret = hash_.GetNoLock(key.ToString().c_str(), &offset);
-
-  // JIYOU -0- begin
-  auto dist = pre_offset > offset ? pre_offset - offset : offset - pre_offset;
-  if (dist < 1024) {
-    cnt[dist]++;
-  }
-  pre_offset = offset;
-  if (hash_item_cnt % 1000000 == 0) {
-    bool has_find = false;
-    for (int i = 0; i < 1024; i++) {
-      if (cnt[i] > 0) {
-        if (!has_find) {
-          std::cout << "pos ";
-          has_find = true;
-        }
-        std::cout << i << " :: " << cnt[i] << " ,";
-      }
-    }
-    std::cout << std::endl;
-  }
-  // JIYOU -- end
-
-#ifdef PERF_COUNT
-  {
-    auto hash_end_time = std::chrono::system_clock::now();
-    auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(hash_end_time - hash_start_time);
-    hash_item_cnt++;
-    hash_look_time_sum += diff.count();
-    if (hash_item_cnt % 1000000 == 0) {
-      std::cout << "hash_time: " << hash_item_cnt
-                << " , " << hash_look_time_sum / 1000
-                << "micro second" << std::endl;
-    }
-  }
-#endif
-
   if (ret == kNotFound) {
     return ret;
   }
 
-  // NOTE: update the cache.
-  // udpate the cache.
-  pre_key = *new_key;
-  has_read = true;
-
-#ifdef PERF_COUNT
-  static thread_local uint64_t disk_read_time_sum = 0;
-  auto disk_start_time = std::chrono::system_clock::now();
-#endif
-
   raio.PrepareRead(offset, lb.buf, kPageSize);
   raio.Submit();
   raio.WaitOver();
-
-#ifdef PERF_COUNT
-  auto disk_end_time = std::chrono::system_clock::now();
-  auto disk_diff = std::chrono::duration_cast<std::chrono::nanoseconds>(disk_end_time - disk_start_time);
-  disk_read_time_sum += disk_diff.count();
-  if (hash_item_cnt % 500000 == 0) {
-    std::cout << "disk_time: " << hash_item_cnt << " , "
-              << disk_read_time_sum / 1000
-              << "micro second" << std::endl;
-  }
-#endif
-
   value->assign(lb.buf, kPageSize);
-
-
-#ifdef PERF_COUNT
-  static thread_local uint64_t copy_time_sum = 0;
-  auto copy_end_time = std::chrono::system_clock::now();
-  auto copy_diff = std::chrono::duration_cast<std::chrono::nanoseconds>(copy_end_time - disk_end_time);
-  copy_time_sum += copy_diff.count();
-  if (hash_item_cnt % 500000 == 0) {
-    std::cout << "copy_time: " << hash_item_cnt << " , "
-              << copy_time_sum / 1000
-              << "micro second" << std::endl;
-  }
-#endif
-
   return kSucc;
 }
 

@@ -54,12 +54,6 @@ class HashTreeTable {
   RetCode GetNoLock(const char* key, uint64_t *l_bytes); // no_lock
   RetCode SetNoLock(const char* key, uint64_t l_bytes); // no_lock
 
-  // if find the key, value += 1
-  // if not find the key, value = 1.
-  // use the value as counter.
-  RetCode AddOrUpdateCount(const uint64_t key);
-  void TopK(uint64_t k);
-
   // NOTE: no lock here. Do not call it anywhere.
   // after load all the entries from disk,
   // for speed up the lookup, need to sort it.
@@ -473,23 +467,12 @@ class EngineRace : public Engine  {
  public:
   static RetCode Open(const std::string& name, Engine** eptr);
 
-#ifdef READ_QUEUE
-  explicit EngineRace(const std::string& dir,
-                      size_t write_queue_size=kMaxQueueSize,
-                      size_t read_queue_size=kMaxQueueSize)
-    : dir_(dir),
-    db_lock_(nullptr),
-    write_queue_(write_queue_size),
-    read_queue_(read_queue_size) {
-  }
-#else
   explicit EngineRace(const std::string& dir,
                       size_t write_queue_size=kMaxQueueSize)
     : dir_(dir),
     db_lock_(nullptr),
     write_queue_(write_queue_size) {
   }
-#endif
 
   virtual ~EngineRace();
 
@@ -507,19 +490,7 @@ class EngineRace : public Engine  {
   void BuildHashTable();
   void WriteEntry();
 
-#ifdef READ_QUEUE
-  void ReadEntry();
-  RetCode  ReadUseQueue(const PolarString& key, std::string *value);
-#endif
-
-
-  bool has_start_write = false;
   void start_write_thread();
-
-#ifdef READ_QUEUE
-  void start_read_thread();
-  RetCode ReadUseMap(const PolarString& key, std::string *value);
-#endif
 
  private:
   std::string dir_;
@@ -528,14 +499,8 @@ class EngineRace : public Engine  {
   // point to the big file.
   int fd_ = -1;
   // read aio, NOTE: no thread safe.
-  struct aio_env write_aio_;
-  // write aio: NOTE: no thread safe.
+  // struct aio_env write_aio_;
   struct aio_env read_aio_;
-
-#ifdef USE_MAP
-  // mmaped data ptr
-  char *mptr_ = nullptr;
-#endif
 
   // control of the write_queue.
   std::atomic<bool> stop_{false};
@@ -552,9 +517,9 @@ class EngineRace : public Engine  {
   // build_hash_tree table.
   uint64_t max_index_offset_ = 0;
 
-#ifdef READ_QUEUE
-  Queue<read_item> read_queue_;
-#endif
+  // use to pin cpu on core.
+  uint64_t max_cpu_cnt_ = 0;
+  std::atomic<uint64_t> cpu_id_{0};
 };
 
 }  // namespace polar_race

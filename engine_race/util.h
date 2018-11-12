@@ -27,7 +27,7 @@
 // #define READ_QUEUE 1
 
 // perf counter.
-#define PERF_COUNT 1
+//#define PERF_COUNT 1
 
 #ifdef PERF_COUNT
   #define BEGIN_POINT(x)  auto x = std::chrono::system_clock::now()
