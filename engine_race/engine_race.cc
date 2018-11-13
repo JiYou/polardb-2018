@@ -548,6 +548,16 @@ void EngineRace::WriteEntry() {
     }
   };
   std::thread thd_wait_aio(wait_aio);
+{
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(1, &cpuset);
+    auto thread_pid = thd_wait_aio.native_handle();
+    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    }
+}
 
   std::vector<write_item*> vs(64, nullptr);
   DEBUG << "db::WriteEntry()" << std::endl;
