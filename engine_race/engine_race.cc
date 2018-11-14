@@ -582,19 +582,16 @@ void EngineRace::WriteEntry() {
 
     uint32_t data_write_size = vs.size() << 12;
 
-    auto f =  std::async(std::launch::async, [&]() {
-      aio->Clear();
-      aio->PrepareWrite(max_index_offset_, aio->index_buf, k1KB);
-      aio->PrepareWrite(max_data_offset_, aio->data_buf, data_write_size);
-      aio->Submit();
-      max_index_offset_ += k1KB;
-      max_data_offset_ += data_write_size;
-    });
+    aio->Clear();
+    aio->PrepareWrite(max_index_offset_, aio->index_buf, k1KB);
+    aio->PrepareWrite(max_data_offset_, aio->data_buf, data_write_size);
+    aio->Submit();
+    max_index_offset_ += k1KB;
+    max_data_offset_ += data_write_size;
 
     for (auto &x: vs) {
       x->feed_back();
     }
-    f.get();
     mgr.PutDataAIO(aio);
   }
   mgr.game_over = true;
