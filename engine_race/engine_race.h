@@ -129,10 +129,9 @@ class HashTreeTable {
 };
 
 // aio just for read operations.
-struct aio_env_single_read {
-  aio_env_single_read(int fd_) {
+struct aio_env_single {
+  aio_env_single(int fd_, bool read=true, bool alloc=true) {
     fd = fd_;
-    // prepare the io context.
     memset(&ctx, 0, sizeof(ctx));
     if (io_setup(kSingleRequest, &ctx) < 0) {
       DEBUG << "Error in io_setup" << std::endl;
@@ -143,17 +142,33 @@ struct aio_env_single_read {
 
     memset(&iocb, 0, sizeof(iocb));
     iocbs = &iocb;
-    iocb.aio_lio_opcode = IO_CMD_PREAD;
+    if (read) {
+      iocb.aio_lio_opcode = IO_CMD_PREAD;
+    } else {
+      iocb.aio_lio_opcode = IO_CMD_PWRITE;
+    }
     iocb.aio_reqprio = 0;
     iocb.aio_fildes = fd;
+    iocb.u.c.buf = buf;
+    iocb.u.c.nbytes = kPageSize;
+
+    if (alloc) {
+      buf = GetAlignedBuffer(kPageSize);
+      if (!buf) {
+        DEBUG << "alloc memory failed\n";
+      }
+    }
   }
 
-  void PrepareRead(uint64_t offset, char *out, uint32_t size) {
-    // iocb.aio_fildes = fd;
+  void Prepare(uint64_t offset) {
+    iocb.u.c.offset = offset;
+    iocb.u.c.buf = buf; // must set here !
+  }
+
+  void Prepare16MB(uint64_t offset, char *out) {
     iocb.u.c.offset = offset;
     iocb.u.c.buf = out;
-    iocb.u.c.nbytes = size;
-    // iocb.aio_lio_opcode = IO_CMD_PREAD;
+    iocb.u.c.nbytes = k16MB;
   }
 
   RetCode Submit() {
@@ -172,11 +187,16 @@ struct aio_env_single_read {
     }
   }
 
-  ~aio_env_single_read() {
+  ~aio_env_single() {
     io_destroy(ctx);
+
+    if (buf) {
+      free(buf);
+    }
   }
 
-  int fd = 0;
+  int fd = -1;
+  char *buf = nullptr;
   io_context_t ctx;
   struct iocb iocb;
   struct iocb* iocbs;

@@ -386,7 +386,7 @@ void EngineRace::BuildHashTable() {
   };
   struct buffer_mgr mgr;
 
-  struct aio_env_single_read read_aio(fd_);
+  struct aio_env_single read_aio(fd_, true/*read*/, false/*nobuf*/);
 
   // just read the content from disk, then put
   // the content into data buffer.
@@ -394,7 +394,7 @@ void EngineRace::BuildHashTable() {
     uint64_t offset = 0;
     while (!mgr.read_over) {
       char *buf = mgr.GetFreeBuffer();
-      read_aio.PrepareRead(offset, buf, k16MB);
+      read_aio.Prepare16MB(offset, buf);
       read_aio.Submit();
       read_aio.WaitOver();
       uint64_t *ar = reinterpret_cast<uint64_t*>(buf);
@@ -672,18 +672,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
 
   // read the content parallel.
   // just give pos,buf to read queue.
-  struct local_buf_read {
-    char *buf = nullptr;
-    local_buf_read() {
-      buf = GetAlignedBuffer(kPageSize); // just 1 MB for every thread as cache.
-    }
-    ~local_buf_read() {
-      free(buf);
-    }
-  };
-
-  static thread_local struct local_buf_read lb;
-  static thread_local struct aio_env_single_read raio(fd_);
+  static thread_local struct aio_env_single raio(fd_, true/*read*/);
 
   uint64_t offset = 0;
   RetCode ret = hash_.GetNoLock(key.ToString().c_str(), &offset);
@@ -691,10 +680,10 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     return ret;
   }
 
-  raio.PrepareRead(offset, lb.buf, kPageSize);
+  raio.Prepare(offset);
   raio.Submit();
   raio.WaitOver();
-  value->assign(lb.buf, kPageSize);
+  value->assign(raio.buf, kPageSize);
   return kSucc;
 }
 
