@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 #include <future>
 #include <deque>
@@ -295,7 +296,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
       }
     }
     // init the aio env
-    // engine_race->write_aio_.SetFD(engine_race->fd_);
   };
   std::thread thd_create_big_file(create_big_file);
 
@@ -455,6 +455,11 @@ EngineRace::~EngineRace() {
 
   if (-1 != fd_) {
     close(fd_);
+  }
+
+  if (-1 != mfd_) {
+    munmap(mptr_, kBigFileSize);
+    close(mfd_);
   }
 }
 
@@ -616,6 +621,48 @@ void EngineRace::start_write_thread() {
 }
 
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
+  static std::once_flag initialized_write;
+  std::call_once (initialized_write, [this] {
+    mfd_ = open(file_name_.c_str(), O_RDWR, 0644);
+    if (mfd_ < 0) {
+      DEBUG << "open big file failed\n";
+    }
+    mptr_ = mmap(NULL, kBigFileSize, PROT_READ|PROT_WRITE, MAP_SHARED, mfd_, 0);;
+    if (mptr_ == MAP_FAILED) {
+      DEBUG << "mmap failed\n";
+      return;
+    }
+  });
+
+  static thread_local uint64_t m_cpu_id = 0xffff;
+  static thread_local struct aio_env_single waio(fd_, false/*write*/, true/*need buf*/);
+
+  if (m_cpu_id == 0xffff) {
+    auto thread_pid = pthread_self();
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    m_cpu_id = cpu_id_++;
+    CPU_SET(m_cpu_id % max_cpu_cnt_, &cpuset);
+    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    }
+  }
+
+  uint64_t idx = kv_cnt_ ++;
+  struct disk_index *di = ((struct disk_index*) mptr_) + idx;
+  di->SetKey(key.ToString().c_str());
+  uint64_t pos = kMaxIndexSize + (kMaxIndexSize*4 + idx*kPageSize);
+  di->pos = pos;
+
+  memcpy(waio.buf, value.ToString().c_str(), kPageSize);
+  waio.Prepare(pos);
+  waio.Submit();
+  waio.WaitOver();
+  return kSucc;
+
+
+#if 0
   start_write_thread();
 
   static thread_local uint64_t m_cpu_id = 0xffff;
@@ -640,6 +687,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   std::unique_lock<std::mutex> l(w.lock_);
   w.cond_.wait(l, [&w] { return w.is_done; });
   return w.ret_code;
+#endif
 }
 
 // for 64 read threads, it would take 64MB as cache read.

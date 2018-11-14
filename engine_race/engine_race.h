@@ -35,6 +35,12 @@ struct disk_index {
     uint64_t *a = reinterpret_cast<uint64_t*>(key);
     *a = *k;
   }
+  void SetKey(const char *k) {
+    uint64_t *a = reinterpret_cast<uint64_t*>(key);
+    const uint64_t *b = reinterpret_cast<const uint64_t*>(k);
+    *a = *b;
+  }
+
 };
 #pragma pack(pop)
 
@@ -172,6 +178,7 @@ struct aio_env_single {
   }
 
   RetCode Submit() {
+    write_over = false;
     if ((io_submit(ctx, kSingleRequest, &iocbs)) != kSingleRequest) {
       DEBUG << "io_submit meet error, " << std::endl;;
       return kIOError;
@@ -185,6 +192,7 @@ struct aio_env_single {
                         &events, &(timeout)) != kSingleRequest) {
       /**/
     }
+    write_over = true;
   }
 
   ~aio_env_single() {
@@ -197,6 +205,7 @@ struct aio_env_single {
 
   int fd = -1;
   char *buf = nullptr;
+  bool write_over = true;
   io_context_t ctx;
   struct iocb iocb;
   struct iocb* iocbs;
@@ -536,6 +545,11 @@ class EngineRace : public Engine  {
   // use to pin cpu on core.
   uint64_t max_cpu_cnt_ = 0;
   std::atomic<uint64_t> cpu_id_{0};
+
+  std::atomic<uint64_t> kv_cnt_{0};
+
+  int mfd_ = -1;
+  void *mptr_ = nullptr;
 };
 
 }  // namespace polar_race
