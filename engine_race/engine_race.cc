@@ -524,7 +524,6 @@ void EngineRace::WriteEntry() {
       data_cond.notify_one();
     }
   };
-
   struct aio_mgr mgr(fd_);
 
   auto wait_aio = [&]() {
@@ -538,7 +537,7 @@ void EngineRace::WriteEntry() {
     }
   };
   std::thread thd_wait_aio(wait_aio);
-{
+  {
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(1, &cpuset);
@@ -547,7 +546,7 @@ void EngineRace::WriteEntry() {
     if (rc != 0) {
       std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
     }
-}
+  }
 
   std::vector<write_item*> vs(64, nullptr);
   DEBUG << "db::WriteEntry()" << std::endl;
