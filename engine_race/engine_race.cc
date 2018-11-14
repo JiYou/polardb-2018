@@ -264,12 +264,10 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   *eptr = NULL;
   EngineRace *engine_race = new EngineRace(name);
   std::atomic<bool> meet_error{false};
-  std::string file_name_str = name + "/" + kBigFileName;
-  const char *file_name = file_name_str.c_str();
-  bool new_db = false;
+  engine_race->file_name_ = name + "/" + kBigFileName;
+  const char *file_name = engine_race->file_name_.c_str();
   // create the dir.
   if (!FileExists(name)) {
-    new_db = true;
     if (mkdir(name.c_str(), 0755)) {
       DEBUG << "mkdir " << name << " failed "  << std::endl;
       return kIOError;
@@ -282,7 +280,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 
     // if not exists. then create it.
     if (engine_race->fd_ < 0 && errno == ENOENT) {
-      new_db = true;
       engine_race->fd_ = open(file_name, O_RDWR | O_CREAT | O_DIRECT, 0644);
       if (engine_race->fd_ < 0) {
         DEBUG << "create big file failed!\n";
@@ -317,13 +314,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   if (meet_error) {
     delete engine_race;
     return kIOError;
-  }
-
-  // after the big file is create, then begin to bulid the
-  // HashTable.
-  // the fd_ is opened.
-  // after build Hash table, also record the next to write pos.
-  if (!new_db) {
   }
 
   engine_race->max_cpu_cnt_ = std::thread::hardware_concurrency();
@@ -670,6 +660,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   });
 
   static thread_local uint64_t m_cpu_id = 0xffff;
+  static thread_local int fd = -1;
   if (m_cpu_id == 0xffff) {
     auto thread_pid = pthread_self();
     cpu_set_t cpuset;
@@ -679,6 +670,12 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
     if (rc != 0) {
       std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    }
+
+    fd = open(file_name_.c_str(), O_RDONLY|O_DIRECT, 0644);
+    if (fd < 0) {
+      DEBUG << "open big file failed\n";
+      return kIOError;
     }
   }
 
@@ -695,7 +692,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   };
 
   static thread_local struct local_buf_read lb;
-  static thread_local struct aio_env_single_read raio(fd_);
+  static thread_local struct aio_env_single_read raio(fd);
   static thread_local uint64_t cnt= 0;
   cnt++;
   if (cnt % 500000 == 0) {

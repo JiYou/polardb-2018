@@ -489,8 +489,8 @@ class EngineRace : public Engine  {
  private:
   void BuildHashTable();
   void WriteEntry();
-
   void start_write_thread();
+  std::string file_name_;
 
  private:
   std::string dir_;
