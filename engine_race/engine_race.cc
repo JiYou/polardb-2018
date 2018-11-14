@@ -340,7 +340,7 @@ void EngineRace::BuildHashTable() {
     std::atomic<bool> read_over{false};
 
     buffer_mgr() {
-      for (uint64_t i = 0; i < 10; i++) {
+      for (uint64_t i = 0; i < 5; i++) {
         free_buffers.push_back(GetAlignedBuffer(k16MB));
       }
     }
@@ -690,11 +690,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
 
   static thread_local struct local_buf_read lb;
   static thread_local struct aio_env_single_read raio(fd);
-  static thread_local uint64_t cnt= 0;
-  cnt++;
-  if (cnt % 500000 == 0) {
-    printf(".\n");
-  }
+
   uint64_t offset = 0;
   RetCode ret = hash_.GetNoLock(key.ToString().c_str(), &offset);
   if (ret == kNotFound) {
