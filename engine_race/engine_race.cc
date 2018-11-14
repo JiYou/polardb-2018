@@ -296,7 +296,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
     }
     // init the aio env
     // engine_race->write_aio_.SetFD(engine_race->fd_);
-    engine_race->read_aio_.SetFD(engine_race->fd_);
   };
   std::thread thd_create_big_file(create_big_file);
 
@@ -387,16 +386,17 @@ void EngineRace::BuildHashTable() {
   };
   struct buffer_mgr mgr;
 
+  struct aio_env_single_read read_aio(fd_);
+
   // just read the content from disk, then put
   // the content into data buffer.
   auto read_disk = [&]() {
     uint64_t offset = 0;
     while (!mgr.read_over) {
       char *buf = mgr.GetFreeBuffer();
-      read_aio_.Clear();
-      read_aio_.PrepareRead(offset, buf, k16MB);
-      read_aio_.Submit();
-      read_aio_.WaitOver();
+      read_aio.PrepareRead(offset, buf, k16MB);
+      read_aio.Submit();
+      read_aio.WaitOver();
       uint64_t *ar = reinterpret_cast<uint64_t*>(buf);
       if (ar[k16MB/8-1] == 0) {
         mgr.read_over = true;
@@ -657,7 +657,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   });
 
   static thread_local uint64_t m_cpu_id = 0xffff;
-  static thread_local int fd = -1;
   if (m_cpu_id == 0xffff) {
     auto thread_pid = pthread_self();
     cpu_set_t cpuset;
@@ -667,12 +666,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
     if (rc != 0) {
       std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
-    }
-
-    fd = open(file_name_.c_str(), O_RDONLY|O_DIRECT, 0644);
-    if (fd < 0) {
-      DEBUG << "open big file failed\n";
-      return kIOError;
     }
   }
 
@@ -689,7 +682,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   };
 
   static thread_local struct local_buf_read lb;
-  static thread_local struct aio_env_single_read raio(fd);
+  static thread_local struct aio_env_single_read raio(fd_);
 
   uint64_t offset = 0;
   RetCode ret = hash_.GetNoLock(key.ToString().c_str(), &offset);

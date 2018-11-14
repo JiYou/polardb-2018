@@ -145,7 +145,6 @@ struct aio_env_single_read {
     iocbs = &iocb;
     iocb.aio_lio_opcode = IO_CMD_PREAD;
     iocb.aio_reqprio = 0;
-    iocb.u.c.nbytes = kPageSize;
     iocb.aio_fildes = fd;
   }
 
@@ -153,7 +152,7 @@ struct aio_env_single_read {
     // iocb.aio_fildes = fd;
     iocb.u.c.offset = offset;
     iocb.u.c.buf = out;
-    // iocb.u.c.nbytes = size;
+    iocb.u.c.nbytes = size;
     // iocb.aio_lio_opcode = IO_CMD_PREAD;
   }
 
@@ -498,9 +497,6 @@ class EngineRace : public Engine  {
 
   // point to the big file.
   int fd_ = -1;
-  // read aio, NOTE: no thread safe.
-  // struct aio_env write_aio_;
-  struct aio_env read_aio_;
 
   // control of the write_queue.
   std::atomic<bool> stop_{false};
