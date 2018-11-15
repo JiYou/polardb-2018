@@ -68,6 +68,7 @@ constexpr int kValueLengthBits = 12;  // stands for 4K
 constexpr size_t kMaxQueueSize = 128; // 4K * 4Kitem ~= 16MB
 constexpr int kMaxThreadNumber = 64; // max number of thread.
 constexpr int kMaxIOEvent = 64;
+constexpr int kMaxFileSize = 104857600ull;
 
 // is key/value disk_item type.
 constexpr uint32_t kValidType = 1;
@@ -140,6 +141,10 @@ class FileLock  {
 
 int LockFile(const std::string& f, FileLock** l);
 int UnlockFile(FileLock* l);
+
+uint64_t toKey(const std::string &str);
+uint64_t toKey(const char *str);
+uint64_t toKey(const polar_race::PolarString &str);
 
 }  // namespace polar_race
 

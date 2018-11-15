@@ -29,36 +29,38 @@ namespace polar_race {
 #pragma pack(push, 1)
 // totaly 16 bytes.
 struct disk_index {
-  char key[kMaxKeyLen];      // 8 byte
-  uint64_t pos;              // 8 byte
-  void SetKey(uint64_t *k) {
-    uint64_t *a = reinterpret_cast<uint64_t*>(key);
-    *a = *k;
+  uint64_t key = 0;
+  uint32_t file_no = 0;
+  uint32_t file_offset = 0;
+  disk_index(uint64_t k, uint32_t fn, uint32_t ff) :
+    key(k), file_no(fn), file_offset(ff) {
   }
-  void SetKey(const char *k) {
-    uint64_t *a = reinterpret_cast<uint64_t*>(key);
-    const uint64_t *b = reinterpret_cast<const uint64_t*>(k);
-    *a = *b;
+  disk_index() { }
+  bool operator < (const uint64_t k) const {
+    return key < k;
+  }
+  bool operator < (const disk_index &x) const {
+    return key < x.key;
+  }
+  bool operator == (const disk_index &k) const {
+    return key == k.key && file_no == k.file_no && file_offset == file_offset;
+  }
+  bool operator != (const disk_index &k) {
+    return key != k.key || file_no != k.file_no || file_offset != file_offset;
   }
 
+  bool is_valid() const {
+    return !(file_no == 0xffff && file_offset == 0xffff);
+  }
 };
 #pragma pack(pop)
 
 class HashTreeTable {
  public:
-  // note, l_bytes means the location in big file
-  // related to bytes, not 4KB
-#ifdef HASH_LOCK
-  RetCode Get(const std::string &key, uint64_t *l_bytes); // with_lock
-  RetCode Set(const std::string &key, uint64_t l_bytes); // with_lock
-  RetCode Get(const char* key, uint64_t *l_bytes); // with_lock
-  RetCode Set(const char* key, uint64_t l_bytes); // with_lock
-#endif
-
-  RetCode GetNoLock(const std::string &key, uint64_t *l_bytes); // no_lock
-  RetCode SetNoLock(const std::string &key, uint64_t l_bytes); // no_lock
-  RetCode GetNoLock(const char* key, uint64_t *l_bytes); // no_lock
-  RetCode SetNoLock(const char* key, uint64_t l_bytes); // no_lock
+  RetCode GetNoLock(const std::string &key, uint32_t *file_no, uint32_t *file_offset); // no_lock
+  RetCode SetNoLock(const std::string &key, uint32_t file_no, uint32_t file_offset); // no_lock
+  RetCode GetNoLock(const char* key, uint32_t *file_no, uint32_t *file_offset); // no_lock
+  RetCode SetNoLock(const char* key, uint32_t file_no, uint32_t file_offset); // no_lock
 
   // NOTE: no lock here. Do not call it anywhere.
   // after load all the entries from disk,
@@ -74,25 +76,12 @@ class HashTreeTable {
   void PrintMeanStdDev();
 
  public:
-
   void Init() {
-    hash_.clear();
     hash_.resize(kMaxBucketSize);
   }
 
-#ifdef HASH_LOCK
-  HashTreeTable(): hash_lock_(kMaxBucketSize) {
-#else
-  HashTreeTable() {
-#endif
-  }
+  HashTreeTable() { }
   ~HashTreeTable() { }
-
-#ifdef HASH_LOCK
- private:
-  void LockHashShard(uint32_t index);
-  void UnlockHashShard(uint32_t index);
-#endif
 
  public:
   HashTreeTable(const HashTreeTable &) = delete;
@@ -100,38 +89,10 @@ class HashTreeTable {
   HashTreeTable &operator=(const HashTreeTable&) = delete;
   HashTreeTable &operator=(const HashTreeTable&&) = delete;
  private:
-  // uint64 & uint32_t would taken 16 bytes, if not align with bytes.
-  #pragma pack(push, 1)
-  struct kv_info {
-    uint64_t key;
-    uint32_t offset_4k_; // just the 4k offset in big file.
-                         // if you want get the right pos, need to <<= 12;
-    kv_info(uint64_t k, uint32_t v): key(k), offset_4k_(v) { }
-    kv_info(): key(0), offset_4k_(0) { }
-    bool operator < (const uint64_t k) const {
-      return key < k;
-    }
-    bool operator < (const kv_info &x) const {
-      return key < x.key;
-    }
-    bool operator == (const kv_info &k) const {
-      return key == k.key && offset_4k_ == k.offset_4k_;
-    }
-    bool operator != (const kv_info &k) {
-      return key != k.key || offset_4k_ != k.offset_4k_;
-    }
-  };
-  #pragma pack(pop)
-  std::vector<std::vector<kv_info>> hash_;
-
-#ifdef HASH_LOCK
-  std::vector<spinlock> hash_lock_;
-  std::bitset<kMaxBucketSize> has_sort_;
-#endif
-
+  std::vector<std::vector<struct disk_index>> hash_;
  private:
   uint32_t compute_pos(uint64_t key);
-  RetCode find(std::vector<kv_info> &vs, bool sorted, uint64_t key, kv_info **ptr);
+  RetCode find(std::vector<struct disk_index> &vs, uint64_t key, struct disk_index**ptr);
 };
 
 // aio just for read operations.
@@ -213,15 +174,8 @@ struct aio_env_single {
   struct timespec timeout;
 };
 
-// 2 AIO context
-// this is just used in write operations.
 struct aio_env_two {
-
   static constexpr int two_event = 2;
-  void SetFD(int fd_) {
-    fd = fd_;
-  }
-
   aio_env_two() {
     // prepare the io context.
     memset(&ctx, 0, sizeof(ctx));
@@ -254,11 +208,7 @@ struct aio_env_two {
     }
   }
 
-  void PrepareRead(uint64_t offset, char *out, uint32_t size, wait_item* item=nullptr) {
-    // align with 4 kb
-    assert ((((uint64_t)out) & 4095) == 0);
-    assert ((size & 1023) == 0);
-    // prepare the io
+  void PrepareRead(int fd, uint64_t offset, char *out, uint32_t size, wait_item* item=nullptr) {
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
@@ -268,10 +218,7 @@ struct aio_env_two {
     index++;
   }
 
-  void PrepareWrite(uint64_t offset, char *out, uint32_t size, wait_item *item=nullptr) {
-    assert ((((uint64_t)out) & 4095) == 0);
-    assert ((size & 1023) == 0);
-
+  void PrepareWrite(int fd, uint64_t offset, char *out, uint32_t size, wait_item *item=nullptr) {
     iocb[index].aio_fildes = fd;
     iocb[index].u.c.offset = offset;
     iocb[index].u.c.buf = out;
@@ -297,16 +244,7 @@ struct aio_env_two {
   void WaitOver() {
     int write_over_cnt = 0;
     while (write_over_cnt != index) {
-      constexpr int min_number = 1;
-      int num_events = io_getevents(ctx, min_number, index, events, &timeout);
-      assert (num_events >= 0);
-      for (int i = 0; i < num_events; i++) {
-        wait_item *feed_back = reinterpret_cast<wait_item*>(events[i].data);
-        if (feed_back) {
-          feed_back->feed_back();
-        }
-      }
-      // need to call for (i = 0; i < num_events; i++) events[i].call_back();
+      int num_events = io_getevents(ctx, 1, index, events, &timeout);
       write_over_cnt += num_events;
     }
   }
@@ -319,7 +257,6 @@ struct aio_env_two {
 
   char *index_buf = nullptr;
   char *data_buf = nullptr;
-  int fd = 0;
   int index = 0;
   io_context_t ctx;
   struct iocb iocb[two_event];
@@ -464,27 +401,14 @@ class Queue {
      * So, if find the items are smaller, wait for some nano seconds.
      */
     void Pop(std::vector<KVItem*> *vs, bool is_write=true) {
-        // wait for more write here.
-        qlock_.lock();
-        if (q_.size() < kMaxThreadNumber && is_write) {
-          qlock_.unlock();
-          // do something here.
-          // is some reader blocked on the request?
-          std::this_thread::sleep_for(std::chrono::nanoseconds(1));
-        } else {
-          qlock_.unlock();
-        }
-
         std::unique_lock<std::mutex> lck(qlock_);
         consume_.wait(lck, [&] {return !q_.empty(); });
-        vs->clear();
-        // get all the items.
-        std::copy(q_.begin(), q_.end(), std::back_inserter((*vs)));
+        vs->swap(q_);
         q_.clear();
         produce_.notify_all();
     }
   private:
-    std::deque<KVItem*> q_;
+    std::vector<KVItem*> q_;
     std::mutex qlock_;
     std::condition_variable produce_;
     std::condition_variable consume_;
@@ -524,9 +448,6 @@ class EngineRace : public Engine  {
   std::string dir_;
   FileLock* db_lock_;
 
-  // point to the big file.
-  int fd_ = -1;
-
   // control of the write_queue.
   std::atomic<bool> stop_{false};
   Queue<write_item> write_queue_;
@@ -547,9 +468,6 @@ class EngineRace : public Engine  {
   std::atomic<uint64_t> cpu_id_{0};
 
   std::atomic<uint64_t> kv_cnt_{0};
-
-  int mfd_ = -1;
-  void *mptr_ = nullptr;
 
   // time counter
   decltype(std::chrono::system_clock::now()) begin_;

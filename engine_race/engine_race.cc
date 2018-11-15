@@ -39,164 +39,59 @@ uint32_t HashTreeTable::compute_pos(uint64_t x) {
   return (((((x % 17) * 19 + x % 19) * 23 + x % 23) * 29 + x % 29) * 31 + x % 31);
 }
 
-#ifdef HASH_LOCK
-
-void HashTreeTable::LockHashShard(uint32_t index) {
-  spin_lock(hash_lock_[index]);
-}
-
-void HashTreeTable::UnlockHashShard(uint32_t index) {
-  spin_unlock(hash_lock_[index]);
-}
-#endif
-
-RetCode HashTreeTable::find(std::vector<kv_info> &vs,
-                            bool sorted,
+RetCode HashTreeTable::find(std::vector<struct disk_index> &vs,
                             uint64_t key,
-                            kv_info **ptr) {
-  // to check is sorted?
-  if (sorted) {
-    // if sort, then use binary_search;
-    auto pos = std::lower_bound(vs.begin(),
-      vs.end(), key, [](const kv_info &a, uint64_t b) {
-      return a < b;
-    });
-    // has find.
-    if (pos != vs.end() && !(key < pos->key)) {
-      *ptr = &(*pos);
-      return kSucc;
-    }
-  } else {
-    // if not sort, find one by one.
-    for (auto &x: vs) {
-      if (x.key == key) {
-        *ptr = &x;
-        return kSucc;
-      }
-    }
+                            struct disk_index**ptr) {
+  auto pos = std::lower_bound(vs.begin(),
+    vs.end(), key, [](const disk_index &a, uint64_t b) {
+    return a.key < b;
+  });
+  // has find.
+  if (pos != vs.end() && !(key < pos->key)) {
+    *ptr = &(*pos);
+    return kSucc;
   }
   return kNotFound;
 }
 
-RetCode HashTreeTable::GetNoLock(const char* key, uint64_t *l) {
+RetCode HashTreeTable::GetNoLock(const char* key, uint32_t *file_no, uint32_t *file_offset) {
   const uint64_t *k = reinterpret_cast<const uint64_t*>(key);
   const uint64_t array_pos = compute_pos(*k);
-
   // then begin to search this array.
   auto &vs = hash_[array_pos];
-  kv_info *ptr = nullptr;
-
-#ifdef HASH_LOCK
-  auto ret = find(vs, has_sort_.test(array_pos), *k, &ptr);
-#else
-  auto ret = find(vs, true, *k, &ptr);
-#endif
-
+  struct disk_index *ptr = nullptr;
+  auto ret = find(vs, *k, &ptr);
   if (ret == kNotFound) {
     return kNotFound;
   }
-  uint64_t pos = ptr->offset_4k_;
-
-  // just get the offset in the big file.
-  *l = pos;
-  *l <<= kValueLengthBits;
+  *file_no = ptr->file_no;
+  *file_offset = ptr->file_offset;
   return kSucc;
 }
 
-RetCode HashTreeTable::GetNoLock(const std::string &key, uint64_t *l) {
-  return GetNoLock(key.c_str(), l);
+RetCode HashTreeTable::GetNoLock(const std::string &key, uint32_t *file_no, uint32_t *file_offset) {
+  return GetNoLock(key.c_str(),  file_no, file_offset);
 }
 
-#ifdef HASH_LOCK
-// l is the real offset.
-RetCode HashTreeTable::Get(const char* key, uint64_t *l) {
-  const uint64_t *k = reinterpret_cast<const uint64_t*>(key);
-  const uint64_t array_pos = compute_pos(*k);
-
-  // then begin to search this array.
-  LockHashShard(array_pos);
-  auto &vs = hash_[array_pos];
-  kv_info *ptr = nullptr;
-  auto ret = find(vs, has_sort_.test(array_pos), *k, &ptr);
-
-  if (ret == kNotFound) {
-    UnlockHashShard(array_pos);
-    return kNotFound;
-  }
-  uint64_t pos = ptr->offset_4k_;
-  UnlockHashShard(array_pos);
-
-  // just get the offset in the big file.
-  *l = pos;
-  *l <<= kValueLengthBits;
-  return kSucc;
-}
-
-RetCode HashTreeTable::Get(const std::string &key, uint64_t *l) {
-  return Get(key.c_str(), l);
-}
-#endif
-
-
-RetCode HashTreeTable::SetNoLock(const char *key, uint64_t l) {
+RetCode HashTreeTable::SetNoLock(const char *key, uint32_t file_no, uint32_t file_offset) {
   const int64_t *k = reinterpret_cast<const int64_t*>(key);
   const uint64_t array_pos = compute_pos(*k);
-  l >>= kValueLengthBits;
-  uint32_t pos = l;
-
   auto &vs = hash_[array_pos];
-  kv_info *ptr;
-
-#ifdef HASH_LOCK
-  auto ret = find(vs, has_sort_.test(array_pos), *k, &ptr);
-#else
-  auto ret = find(vs, true, *k, &ptr);
-#endif
+  struct disk_index *ptr = nullptr;
+  auto ret = find(vs, *k, &ptr);
 
   if (ret == kNotFound) {
-    vs.emplace_back(*k, pos);
-    // broken the sorted list.
-#ifdef HASH_LOCK
-    has_sort_.reset(array_pos);
-#endif
+    vs.emplace_back(*k, file_no, file_offset);
   } else {
-    ptr->offset_4k_ = pos;
+    ptr->file_no = file_no;
+    ptr->file_offset = file_offset;
   }
   return kSucc;
 }
 
-RetCode HashTreeTable::SetNoLock(const std::string &key, uint64_t l) {
-  return SetNoLock(key.c_str(), l);
+RetCode HashTreeTable::SetNoLock(const std::string &key, uint32_t file_no, uint32_t file_offset) {
+  return SetNoLock(key.c_str(), file_no, file_offset);
 }
-
-#ifdef HASH_LOCK
-
-RetCode HashTreeTable::Set(const char *key, uint64_t l) {
-  const int64_t *k = reinterpret_cast<const int64_t*>(key);
-  const uint64_t array_pos = compute_pos(*k);
-  l >>= kValueLengthBits;
-  uint32_t pos = l;
-
-  LockHashShard(array_pos);
-  auto &vs = hash_[array_pos];
-  kv_info *ptr;
-  auto ret = find(vs, has_sort_.test(array_pos), *k, &ptr);
-
-  if (ret == kNotFound) {
-    vs.emplace_back(*k, pos);
-    // broken the sorted list.
-    has_sort_.reset(array_pos);
-  } else {
-    ptr->offset_4k_ = pos;
-  }
-  UnlockHashShard(array_pos);
-  return kSucc;
-}
-
-RetCode HashTreeTable::Set(const std::string &key, uint64_t l) {
-  return Set(key.c_str(), l);
-}
-#endif
 
 void HashTreeTable::Sort() {
   // there are 64 thread.
@@ -209,13 +104,6 @@ void HashTreeTable::Sort() {
     }
   };
 
-#ifdef HASH_LOCK
-  auto set_all_sorted = [this]() {
-      has_sort_.set();
-  };
-  std::thread set_sort_bit(set_all_sorted);
-#endif
-
   std::vector<std::thread> thread_list;
   constexpr int segment_size = 104355;
   for (int i = 0; i < kMaxThreadNumber; i++) {
@@ -227,10 +115,6 @@ void HashTreeTable::Sort() {
   for (auto &x: thread_list) {
     x.join();
   }
-
-#ifdef HASH_LOCK
-  set_sort_bit.join();
-#endif
 }
 
 void HashTreeTable::PrintMeanStdDev() {
@@ -268,8 +152,7 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   engine_race->begin_ = std::chrono::system_clock::now();
 
   std::atomic<bool> meet_error{false};
-  engine_race->file_name_ = name + "/" + kBigFileName;
-  const char *file_name = engine_race->file_name_.c_str();
+  engine_race->file_name_ = name + "/";
   // create the dir.
   if (!FileExists(name)) {
     if (mkdir(name.c_str(), 0755)) {
@@ -278,31 +161,7 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
     }
   }
 
-  // use truncate to create the big file.
-  auto create_big_file = [&]() {
-    engine_race->fd_ = open(file_name, O_RDWR | O_DIRECT, 0644);
-
-    // if not exists. then create it.
-    if (engine_race->fd_ < 0 && errno == ENOENT) {
-      engine_race->fd_ = open(file_name, O_RDWR | O_CREAT | O_DIRECT, 0644);
-      if (engine_race->fd_ < 0) {
-        DEBUG << "create big file failed!\n";
-        meet_error = true;
-        return;
-      }
-      // if open success.
-      int ret = 0;
-      if ((ret=posix_fallocate(engine_race->fd_, 0, kBigFileSize))) {
-        DEBUG << "posix_fallocate failed, ret = " << ret << std::endl;
-        meet_error = true;
-        return;
-      }
-    }
-    // init the aio env
-  };
-  std::thread thd_create_big_file(create_big_file);
-
-  auto creat_lock_file = [&engine_race, &meet_error, &name, &file_name]() {
+  auto creat_lock_file = [&]() {
     if (0 != LockFile(name + "/" + kLockFile, &(engine_race->db_lock_))) {
       meet_error = true;
       DEBUG << "Generate LOCK file failed" << std::endl;
@@ -310,8 +169,6 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   };
   std::thread thd_creat_lock_file(creat_lock_file);
 
-  // next thread to create the big file.
-  thd_create_big_file.join();
   thd_creat_lock_file.join();
   if (meet_error) {
     delete engine_race;
@@ -324,74 +181,9 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   return kSucc;
 }
 
-// or just read 800MB from disk?
-// which is faster?
 void EngineRace::BuildHashTable() {
   hash_.Init();
-  // use two thread, on read every 16MB from disk.
-  // the other one insert the item into hash table.
-  struct buffer_mgr {
-    std::mutex free_lock;
-    std::condition_variable free_cond;
-    std::vector<char*> free_buffers;
-
-    std::mutex data_lock;
-    std::condition_variable data_cond;
-    std::deque<char*> data_buffers;
-
-    std::atomic<bool> read_over{false};
-
-    buffer_mgr() {
-      for (uint64_t i = 0; i < 5; i++) {
-        free_buffers.push_back(GetAlignedBuffer(k16MB));
-      }
-    }
-
-    ~buffer_mgr() {
-      for (auto &x: free_buffers) {
-        DEBUG << "free 16MB\n";
-        free(x);
-      }
-      for (auto &x: data_buffers) {
-        DEBUG << "free 16MB\n";
-        free(x);
-      }
-    }
-
-    char *GetFreeBuffer() {
-      std::unique_lock<std::mutex> l(free_lock);
-      free_cond.wait(l, [&] { return free_buffers.size() > 0; });
-      char *buf = free_buffers.back();
-      free_buffers.pop_back();
-      return buf;
-    }
-
-    void PutFreeBuffer(char *buf) {
-      std::unique_lock<std::mutex> l(free_lock);
-      free_buffers.push_back(buf);
-      free_cond.notify_one();
-    }
-
-    // must get from front buffer.
-    char *GetDataBuffer() {
-      std::unique_lock<std::mutex> l(data_lock);
-      data_cond.wait(l, [&] { return data_buffers.size() > 0; });
-      char *buf = data_buffers.front();
-      data_buffers.pop_front();
-      return buf;
-    }
-
-    void PutDataBuffer(char *buf) {
-      std::unique_lock<std::mutex> l(data_lock);
-      data_buffers.push_back(buf);
-      data_cond.notify_one();
-    }
-  };
-  struct buffer_mgr mgr;
-
-  struct aio_env_single read_aio(fd_, true/*read*/, false/*nobuf*/);
-
-  // just read the content from disk, then put
+/*
   // the content into data buffer.
   auto read_disk = [&]() {
     uint64_t offset = 0;
@@ -446,8 +238,7 @@ void EngineRace::BuildHashTable() {
 
   thd_read_disk.join();
   thd_insert_hash.join();
-  DEBUG << "max_data_offset_ = " << max_data_offset_ << std::endl;
-  DEBUG << "max_index_offset_ = " << max_index_offset_ << std::endl;
+*/
 }
 
 EngineRace::~EngineRace() {
@@ -456,159 +247,106 @@ EngineRace::~EngineRace() {
     UnlockFile(db_lock_);
   }
 
-  if (-1 != fd_) {
-    close(fd_);
-  }
-
-  if (-1 != mfd_) {
-    munmap(mptr_, kBigFileSize);
-    close(mfd_);
-  }
-
   end_ = std::chrono::system_clock::now();
   auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ - begin_);
   std::cout << "Total Time " << diff.count() / kNanoToMS << " (micro second)" << std::endl;
 }
 
 void EngineRace::WriteEntry() {
-  // there are two threads here.
-  // one is just flush the io into disks
-  // after submit, then it return to client.
-  // the other one, call the WaitOver with specific time.
-  struct aio_mgr {
-    std::mutex free_lock;
-    std::condition_variable free_cond;
-    std::vector<struct aio_env_two*> free_io;
-
-    std::mutex data_lock;
-    std::condition_variable data_cond;
-    std::deque<struct aio_env_two*> data_io;
-
-    std::atomic<bool> game_over {false};
-    // every round of write,
-    // 1KB for index. 256KB for data.
-    // then nearly 257MB for all the buffer and memory.
-    #define TWO_AIO_SZ 1024
-    struct aio_env_two _aio_[TWO_AIO_SZ];
-    aio_mgr(int fd_) {
-      for (uint64_t i = 0; i < TWO_AIO_SZ; i++) {
-        _aio_[i].SetFD(fd_);
-        free_io.push_back(_aio_+i);
-      }
-    }
-
-    ~aio_mgr() {
-      game_over = true;
-    }
-
-    struct aio_env_two *GetFreeAIO() {
-      std::unique_lock<std::mutex> l(free_lock);
-      free_cond.wait(l, [&] { return free_io.size() > 0 || game_over; });
-      if (game_over) {
-        return nullptr;
-      }
-      auto *aio= free_io.back();
-      free_io.pop_back();
-      return aio;
-    }
-
-    void PutFreeAIO(struct aio_env_two *aio) {
-      std::unique_lock<std::mutex> l(free_lock);
-      free_io.push_back(aio);
-      free_cond.notify_one();
-    }
-
-    // must get from front buffer.
-    struct aio_env_two *GetDataAIO() {
-      std::unique_lock<std::mutex> l(data_lock);
-      data_cond.wait(l, [&] { return data_io.size() > 0 || game_over; });
-      if (game_over) {
-        return nullptr;
-      }
-      auto *aio = data_io.front();
-      data_io.pop_front();
-      return aio;
-    }
-
-    void PutDataAIO(struct aio_env_two *aio) {
-      std::unique_lock<std::mutex> l(data_lock);
-      data_io.push_back(aio);
-      data_cond.notify_one();
-    }
-  };
-  struct aio_mgr mgr(fd_);
-
-  auto wait_aio = [&]() {
-    while (!mgr.game_over) {
-      auto aio = mgr.GetDataAIO();
-      if (!aio) {
-        break;
-      }
-      aio->WaitOver();
-      mgr.PutFreeAIO(aio);
-    }
-  };
-  std::thread thd_wait_aio(wait_aio);
-  {
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(1, &cpuset);
-    auto thread_pid = thd_wait_aio.native_handle();
-    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
-    if (rc != 0) {
-      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
-    }
-  }
-
   std::vector<write_item*> vs(64, nullptr);
-  DEBUG << "db::WriteEntry()" << std::endl;
-  uint64_t empty_key = 0;
+  uint64_t idx_size = 0;
+  uint64_t data_size = 0;
+  struct aio_env_two aio;
+
+  // write file every time from the start
+  uint64_t idx_no = 0;
+  uint64_t data_no = 0;
+  int idx_fd = -1;
+  int data_fd = -1;
 
   while (!stop_) {
     write_queue_.Pop(&vs);
-    // get free aio
-    auto aio = mgr.GetFreeAIO();
-    if (!aio) {
-      break;
-    }
 
-    struct disk_index *di = reinterpret_cast<struct disk_index*>(aio->index_buf);
-    char *to = aio->data_buf;
-    for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
-      if (i < vs.size()) {
-        auto &x = vs[i];
-        char *key_buf = const_cast<char*>(x->key->ToString().c_str());
-        uint64_t *key = reinterpret_cast<uint64_t*>(key_buf);
-        di->SetKey(key);
-        di->pos = max_data_offset_ + (i<<kValueLengthBits);
-        di++;
-        memcpy(to, x->value->ToString().c_str(), kPageSize);
-        to += kPageSize;
-      } else {
-        di->SetKey(&empty_key);
-        di->pos = kIndexSkipType;
-        di++;
+    struct disk_index *di = reinterpret_cast<struct disk_index*>(aio.index_buf);
+    char *to = aio.data_buf;
+
+    auto cp_mem = [&]() {
+      for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
+        if (i < vs.size()) {
+          auto &x = vs[i];
+          di->key = toKey(x->key->ToString().c_str());
+          di->file_no = data_no;
+          di->file_offset = data_size;
+          di++;
+          memcpy(to, x->value->ToString().c_str(), kPageSize);
+          to += kPageSize;
+        } else {
+          di->key = 0;
+          di->file_no = 0xffff;
+          di->file_offset = 0xffff;
+          di++;
+        }
       }
-    }
+    };
+    std::thread thd_cp_mem(cp_mem);
 
-    uint32_t data_write_size = vs.size() << 12;
+
+    auto create_file = [](const char *file_name) ->int {
+        int fd = open(file_name, O_RDWR | O_CREAT | O_DIRECT, 0644);
+        if (fd < 0) {
+          DEBUG << "open inex file " << file_name << "failed\n";
+          return -1;
+        }
+        // pre alloc the file data.
+        auto ret = posix_fallocate(fd, 0, kMaxFileSize);
+        if (ret) {
+          DEBUG << "posix_fallocate failed, ret = " << ret << std::endl;
+          return -1;
+        }
+        return fd;
+    };
+
+    auto cr_fd = [&]() {
+      if (idx_fd == -1 || (idx_size + kPageSize) > kMaxFileSize) {
+        idx_no++;
+        auto idx_name = file_name_ + "idx_" + std::to_string(idx_no);
+        if (idx_fd > 0) {
+          close(idx_fd);
+        }
+        idx_fd = create_file(idx_name.c_str());
+        idx_size = 0;
+      }
+
+      if(data_fd == -1 || (data_size + k256KB) > kMaxFileSize) {
+        data_no++;
+        auto data_name = file_name_ + "data" + std::to_string(data_no);
+        if (data_fd > 0) {
+          close(data_fd);
+        }
+        data_fd = create_file(data_name.c_str());
+        data_size = 0;
+      }
+    };
+    std::thread thd_cr_fd(cr_fd);
+
+    thd_cp_mem.join();
+    thd_cr_fd.join();
 
     auto f = std::async(std::launch::async, [&]() {
-      aio->Clear();
-      aio->PrepareWrite(max_index_offset_, aio->index_buf, k1KB);
-      aio->PrepareWrite(max_data_offset_, aio->data_buf, data_write_size);
-      aio->Submit();
-      max_index_offset_ += k1KB;
-      max_data_offset_ += data_write_size;
+      aio.Clear();
+      aio.PrepareWrite(idx_fd, idx_size, aio.index_buf, k1KB);
+      aio.PrepareWrite(data_fd, data_size, aio.data_buf, k256KB);
+      aio.Submit();
+      idx_size += kPageSize;
+      data_size += k256KB;
     });
+
     for (auto &x: vs) {
       x->feed_back();
     }
     f.get();
-    mgr.PutDataAIO(aio);
+    aio.WaitOver();
   }
-  mgr.game_over = true;
-  thd_wait_aio.join();
 }
 
 void EngineRace::start_write_thread() {
@@ -628,51 +366,6 @@ void EngineRace::start_write_thread() {
 }
 
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
-  static std::once_flag initialized_write;
-  std::call_once (initialized_write, [this] {
-    mfd_ = open(file_name_.c_str(), O_RDWR, 0644);
-    if (mfd_ < 0) {
-      DEBUG << "open big file failed\n";
-    }
-    mptr_ = mmap(NULL, kBigFileSize, PROT_READ|PROT_WRITE, MAP_SHARED, mfd_, 0);;
-    if (mptr_ == MAP_FAILED) {
-      DEBUG << "mmap failed\n";
-      return;
-    }
-  });
-
-  static thread_local uint64_t m_cpu_id = 0xffff;
-  static thread_local struct aio_env_single waio(fd_, false/*write*/, true/*need buf*/);
-
-  if (m_cpu_id == 0xffff) {
-    auto thread_pid = pthread_self();
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    m_cpu_id = cpu_id_++;
-    CPU_SET(m_cpu_id % max_cpu_cnt_, &cpuset);
-    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
-    if (rc != 0) {
-      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
-    }
-  }
-
-  uint64_t idx = kv_cnt_ ++;
-  uint64_t pos = kMaxIndexSize + (kMaxIndexSize*4 + idx*kPageSize);
-
-  memcpy(waio.buf, value.ToString().c_str(), kPageSize);
-  waio.Prepare(pos);
-  waio.Submit();
-
-  // write the index
-  struct disk_index *di = ((struct disk_index*) mptr_) + idx;
-  di->SetKey(key.ToString().c_str());
-  di->pos = pos;
-
-  waio.WaitOver();
-  return kSucc;
-
-
-#if 0
   start_write_thread();
 
   static thread_local uint64_t m_cpu_id = 0xffff;
@@ -697,7 +390,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   std::unique_lock<std::mutex> l(w.lock_);
   w.cond_.wait(l, [&w] { return w.is_done; });
   return w.ret_code;
-#endif
 }
 
 // for 64 read threads, it would take 64MB as cache read.
@@ -727,21 +419,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
       std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
     }
   }
-
-  // read the content parallel.
-  // just give pos,buf to read queue.
-  static thread_local struct aio_env_single raio(fd_, true/*read*/);
-
-  uint64_t offset = 0;
-  RetCode ret = hash_.GetNoLock(key.ToString().c_str(), &offset);
-  if (ret == kNotFound) {
-    return ret;
-  }
-
-  raio.Prepare(offset);
-  raio.Submit();
-  raio.WaitOver();
-  value->assign(raio.buf, kPageSize);
   return kSucc;
 }
 

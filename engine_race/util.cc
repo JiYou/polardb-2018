@@ -160,4 +160,19 @@ char *GetAlignedBuffer(uint64_t bufer_size) {
   return buf;
 }
 
+uint64_t toKey(const std::string &str) {
+  return toKey(str.c_str());
+}
+
+uint64_t toKey(const char *str) {
+  const uint64_t *key = reinterpret_cast<const uint64_t*>(str);
+  return *key;
+}
+
+uint64_t toKey(const polar_race::PolarString &str) {
+  return toKey(str.ToString().c_str());
+}
+
+
+
 }  // namespace polar_race
