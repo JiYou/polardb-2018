@@ -550,6 +550,10 @@ class EngineRace : public Engine  {
 
   int mfd_ = -1;
   void *mptr_ = nullptr;
+
+  // time counter
+  decltype(std::chrono::system_clock::now()) begin_;
+  decltype(std::chrono::system_clock::now()) end_;
 };
 
 }  // namespace polar_race

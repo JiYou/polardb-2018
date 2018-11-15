@@ -264,6 +264,9 @@ Engine::~Engine() {
 RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   *eptr = NULL;
   EngineRace *engine_race = new EngineRace(name);
+
+  engine_race->begin_ = std::chrono::system_clock::now();
+
   std::atomic<bool> meet_error{false};
   engine_race->file_name_ = name + "/" + kBigFileName;
   const char *file_name = engine_race->file_name_.c_str();
@@ -461,6 +464,10 @@ EngineRace::~EngineRace() {
     munmap(mptr_, kBigFileSize);
     close(mfd_);
   }
+
+  end_ = std::chrono::system_clock::now();
+  auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ - begin_);
+  std::cout << "Total Time " << diff.count() / kNanoToMS << " (micro second)" << std::endl;
 }
 
 void EngineRace::WriteEntry() {
