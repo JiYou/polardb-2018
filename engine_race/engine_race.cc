@@ -650,14 +650,17 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   }
 
   uint64_t idx = kv_cnt_ ++;
-  struct disk_index *di = ((struct disk_index*) mptr_) + idx;
-  di->SetKey(key.ToString().c_str());
   uint64_t pos = kMaxIndexSize + (kMaxIndexSize*4 + idx*kPageSize);
-  di->pos = pos;
 
   memcpy(waio.buf, value.ToString().c_str(), kPageSize);
   waio.Prepare(pos);
   waio.Submit();
+
+  // write the index
+  struct disk_index *di = ((struct disk_index*) mptr_) + idx;
+  di->SetKey(key.ToString().c_str());
+  di->pos = pos;
+
   waio.WaitOver();
   return kSucc;
 
