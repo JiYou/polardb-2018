@@ -61,6 +61,7 @@ class HashTreeTable {
   RetCode SetNoLock(const std::string &key, uint32_t file_no, uint32_t file_offset); // no_lock
   RetCode GetNoLock(const char* key, uint32_t *file_no, uint32_t *file_offset); // no_lock
   RetCode SetNoLock(const char* key, uint32_t file_no, uint32_t file_offset); // no_lock
+  RetCode SetNoLock(const uint64_t key, uint32_t file_no, uint32_t file_offset); // no_lock
 
   // NOTE: no lock here. Do not call it anywhere.
   // after load all the entries from disk,
@@ -127,6 +128,11 @@ struct aio_env_single {
     }
   }
 
+  void SetFD(int fd_) {
+    fd = fd_;
+    iocb.aio_fildes = fd;
+  }
+
   void Prepare(uint64_t offset) {
     iocb.u.c.offset = offset;
     iocb.u.c.buf = buf; // must set here !
@@ -137,6 +143,13 @@ struct aio_env_single {
     iocb.u.c.buf = out;
     iocb.u.c.nbytes = k16MB;
   }
+
+  void Prepare100MB(uint64_t offset, char *out) {
+    iocb.u.c.offset = offset;
+    iocb.u.c.buf = out;
+    iocb.u.c.nbytes = kMaxFileSize;
+  }
+
 
   RetCode Submit() {
     write_over = false;
@@ -466,8 +479,10 @@ class EngineRace : public Engine  {
   // use to pin cpu on core.
   uint64_t max_cpu_cnt_ = 0;
   std::atomic<uint64_t> cpu_id_{0};
-
   std::atomic<uint64_t> kv_cnt_{0};
+
+  // open all the data files.
+  std::vector<int> data_fds_;
 
   // time counter
   decltype(std::chrono::system_clock::now()) begin_;

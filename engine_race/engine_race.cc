@@ -160,6 +160,15 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
       return kIOError;
     }
   }
+  // create index/data dir.
+  std::string index_dir = engine_race->file_name_ + kMetaDirName;
+  if (mkdir(index_dir.c_str(), 0755)) {
+    DEBUG << "mkdir" << index_dir << "failed\n";
+  }
+  std::string data_dir = engine_race->file_name_ + kDataDirName;
+  if (mkdir(data_dir.c_str(), 0755)) {
+    DEBUG << "mkdir" << data_dir << "failed\n";
+  }
 
   auto creat_lock_file = [&]() {
     if (0 != LockFile(name + "/" + kLockFile, &(engine_race->db_lock_))) {
@@ -183,68 +192,97 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 
 void EngineRace::BuildHashTable() {
   hash_.Init();
-/*
-  // the content into data buffer.
-  auto read_disk = [&]() {
-    uint64_t offset = 0;
-    while (!mgr.read_over) {
-      char *buf = mgr.GetFreeBuffer();
-      read_aio.Prepare16MB(offset, buf);
-      read_aio.Submit();
-      read_aio.WaitOver();
-      uint64_t *ar = reinterpret_cast<uint64_t*>(buf);
-      if (ar[k16MB/8-1] == 0) {
-        mgr.read_over = true;
-      }
-      mgr.PutDataBuffer(buf);
-      offset += k16MB;
-    }
-  };
-  std::thread thd_read_disk(read_disk);
 
-  bool has_find_valid = false;
-  // this is not thread function.
-  auto buf_to_hash = [&](char *buf) {
-    struct disk_index *array = reinterpret_cast<struct disk_index*>(buf);
-    for (uint64_t i = 0; i < k16MB / sizeof(struct disk_index); i++) {
-      auto ref = array + i;
-      if (ref->pos == 0) {
+  // scan all the files under the folder.
+  std::vector<std::string> files;
+  // scan the index file dir.
+  std::string dir = file_name_ + kMetaDirName;
+  if (0 != GetDirFiles(dir, &files)) {
+    DEBUG << "call GetDirFiles() failed: " << dir << std::endl;
+  }
+
+  // sort the meta files.
+  std::sort(files.begin(), files.end(),
+    [](const std::string &a, const std::string &b) {
+      const int va = atoi(a.c_str());
+      const int vb = atoi(b.c_str());
+      return va < vb;
+    }
+  );
+
+  // read all the files into hash table.
+  char *buf = GetAlignedBuffer(kMaxFileSize + 32);
+  if (!buf) {
+    DEBUG << "alloc memory for buf failed\n";
+    return;
+  }
+
+  struct aio_env_single read_aio(-1, true/*read*/, false/*nobuf*/);
+  uint64_t cnt = 0;
+
+  for (auto fn: files) {
+    // read all the conten from file.
+    auto file_name = file_name_ + kMetaDirName + "/" + fn;
+    auto fd = open(file_name.c_str(), O_RDONLY|O_DIRECT, 0644);
+    if (fd < 0) {
+      DEBUG << "can not open file: " << file_name << std::endl;
+      return;
+    }
+
+    read_aio.SetFD(fd);
+    read_aio.Prepare100MB(0, buf);
+    read_aio.Submit();
+    read_aio.WaitOver();
+
+    struct disk_index *di = (struct disk_index*)buf;
+    for (uint64_t i = 0; i < kMaxFileSize / sizeof(struct disk_index); i++) {
+      auto ref = di[i];
+      if (ref.file_no == 0 && ref.file_offset == 0) {
         break;
       }
-      max_index_offset_ += sizeof(struct disk_index);
-      if (ref->pos == kIndexSkipType) {
+      if (!ref.is_valid()) {
         continue;
       }
-      has_find_valid = true;
-      hash_.SetNoLock(ref->key, ref->pos);
-      max_data_offset_ = std::max(max_data_offset_, ref->pos);
+      cnt++;
+      const char *k = reinterpret_cast<const char*>(&(ref.key));
+      hash_.SetNoLock(k, ref.file_no, ref.file_offset);
     }
-  };
+    // NOTE: if the file is less than 100MB, need to clear the memory.
 
-  auto insert_hash = [&]() {
-    while (!mgr.read_over) {
-      char *buf = mgr.GetDataBuffer();
-      buf_to_hash(buf);
-      mgr.PutFreeBuffer(buf);
+    DEBUG << "item = " << cnt << std::endl;
+
+    close(fd);
+  }
+
+  free(buf);
+
+  // then open all the data_fds_;
+  files.clear();
+  dir = file_name_ + kDataDirName;
+  if (0 != GetDirFiles(dir, &files)) {
+    DEBUG << "call GetDirFiles() failed: " << dir << std::endl;
+  }
+  data_fds_.resize(files.size() + 1, 0);
+
+  for (auto &fn : files) {
+    std::string file_name = file_name_ + kDataDirName + "/" + fn;
+    auto fd = open(file_name.c_str(), O_RDONLY|O_DIRECT, 0644);
+    if (fd < 0) {
+      DEBUG << "can not open file " << file_name << std::endl;
+      return;
     }
-
-    // deal with all the left data buffer;
-    // note: no lock here.
-    for (auto &x: mgr.data_buffers) {
-      buf_to_hash(x);
-    }
-  };
-  std::thread thd_insert_hash(insert_hash);
-
-  thd_read_disk.join();
-  thd_insert_hash.join();
-*/
+    data_fds_[atoi(fn.c_str())] = fd;
+  }
 }
 
 EngineRace::~EngineRace() {
   stop_ = true;
   if (db_lock_) {
     UnlockFile(db_lock_);
+  }
+
+  for (auto &fd: data_fds_) {
+    close(fd);
   }
 
   end_ = std::chrono::system_clock::now();
@@ -259,37 +297,13 @@ void EngineRace::WriteEntry() {
   struct aio_env_two aio;
 
   // write file every time from the start
-  uint64_t idx_no = 0;
-  uint64_t data_no = 0;
+  int64_t idx_no = -1;
+  int64_t data_no = 0;
   int idx_fd = -1;
   int data_fd = -1;
 
   while (!stop_) {
     write_queue_.Pop(&vs);
-
-    struct disk_index *di = reinterpret_cast<struct disk_index*>(aio.index_buf);
-    char *to = aio.data_buf;
-
-    auto cp_mem = [&]() {
-      for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
-        if (i < vs.size()) {
-          auto &x = vs[i];
-          di->key = toKey(x->key->ToString().c_str());
-          di->file_no = data_no;
-          di->file_offset = data_size;
-          di++;
-          memcpy(to, x->value->ToString().c_str(), kPageSize);
-          to += kPageSize;
-        } else {
-          di->key = 0;
-          di->file_no = 0xffff;
-          di->file_offset = 0xffff;
-          di++;
-        }
-      }
-    };
-    std::thread thd_cp_mem(cp_mem);
-
 
     auto create_file = [](const char *file_name) ->int {
         int fd = open(file_name, O_RDWR | O_CREAT | O_DIRECT, 0644);
@@ -307,9 +321,9 @@ void EngineRace::WriteEntry() {
     };
 
     auto cr_fd = [&]() {
-      if (idx_fd == -1 || (idx_size + kPageSize) > kMaxFileSize) {
+      if (idx_fd == -1 || (idx_size + k1KB) > kMaxFileSize) {
         idx_no++;
-        auto idx_name = file_name_ + "idx_" + std::to_string(idx_no);
+        auto idx_name = file_name_ + kMetaDirName + "/" + std::to_string(idx_no);
         if (idx_fd > 0) {
           close(idx_fd);
         }
@@ -319,7 +333,7 @@ void EngineRace::WriteEntry() {
 
       if(data_fd == -1 || (data_size + k256KB) > kMaxFileSize) {
         data_no++;
-        auto data_name = file_name_ + "data" + std::to_string(data_no);
+        auto data_name = file_name_ + kDataDirName +"/" + std::to_string(data_no);
         if (data_fd > 0) {
           close(data_fd);
         }
@@ -327,17 +341,38 @@ void EngineRace::WriteEntry() {
         data_size = 0;
       }
     };
-    std::thread thd_cr_fd(cr_fd);
+    cr_fd();
 
-    thd_cp_mem.join();
-    thd_cr_fd.join();
+    struct disk_index *di = reinterpret_cast<struct disk_index*>(aio.index_buf);
+    char *to = aio.data_buf;
+    auto file_pos = data_size;
+    auto cp_mem = [&]() {
+      for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
+        if (i < vs.size()) {
+          auto &x = vs[i];
+          di->key = toKey(x->key->ToString().c_str());
+          di->file_no = data_no;
+          di->file_offset = file_pos;
+          di++;
+          memcpy(to, x->value->ToString().c_str(), kPageSize);
+          to += kPageSize;
+          file_pos += kPageSize;
+        } else {
+          di->key = 0;
+          di->file_no = 0xffffffff;
+          di->file_offset = 0xffffffff;
+          di++;
+        }
+      }
+    };
+    cp_mem();
 
     auto f = std::async(std::launch::async, [&]() {
       aio.Clear();
       aio.PrepareWrite(idx_fd, idx_size, aio.index_buf, k1KB);
       aio.PrepareWrite(data_fd, data_size, aio.data_buf, k256KB);
       aio.Submit();
-      idx_size += kPageSize;
+      idx_size += k1KB;
       data_size += k256KB;
     });
 
@@ -347,6 +382,9 @@ void EngineRace::WriteEntry() {
     f.get();
     aio.WaitOver();
   }
+
+  close(idx_fd);
+  close(data_fd);
 }
 
 void EngineRace::start_write_thread() {
@@ -419,6 +457,20 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
       std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
     }
   }
+
+  static thread_local struct aio_env_single read_aio(-1, true/*read*/, true/*buf*/);
+  uint32_t file_no = 0;
+  uint32_t file_offset = 0;
+  auto ret = hash_.GetNoLock(key.ToString().c_str(), &file_no, &file_offset);
+  if (ret != kSucc) {
+    return kNotFound;
+  }
+  // begin to find the key & pos
+  read_aio.SetFD(data_fds_[file_no]);
+  read_aio.Prepare(file_offset);
+  read_aio.Submit();
+  read_aio.WaitOver();
+  value->assign(read_aio.buf, kPageSize);
   return kSucc;
 }
 

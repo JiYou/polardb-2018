@@ -48,6 +48,9 @@
 
 namespace polar_race {
 
+static const std::string kMetaDirName = "index";
+static const std::string kDataDirName = "data";
+
 constexpr int64_t kNanoToMS = 1000000;
 constexpr uint32_t kMaxKeyLen = 8;
 constexpr uint32_t kMaxValueLen = 4096;
@@ -68,7 +71,7 @@ constexpr int kValueLengthBits = 12;  // stands for 4K
 constexpr size_t kMaxQueueSize = 128; // 4K * 4Kitem ~= 16MB
 constexpr int kMaxThreadNumber = 64; // max number of thread.
 constexpr int kMaxIOEvent = 64;
-constexpr int kMaxFileSize = 104857600ull;
+constexpr uint64_t kMaxFileSize = 104857600ull;
 
 // is key/value disk_item type.
 constexpr uint32_t kValidType = 1;
