@@ -26,6 +26,7 @@
 
 namespace polar_race {
 
+
 #pragma pack(push, 1)
 // totaly 16 bytes.
 struct disk_index {

@@ -322,13 +322,15 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   static thread_local int m_thread_id = 0xffff;
   static thread_local int idx_no = -1;
   static thread_local int data_no = 0;
-  // TODO: after the program exit, need to close the fd & free buffer.
   static thread_local int idx_fd = -1;
   static thread_local int data_fd = -1; // data file index start from 1, to help on invalid check.
   static thread_local uint64_t idx_size = 0;
   static thread_local uint64_t data_size = 0;
   static thread_local struct disk_index di;
-  static thread_local char *buf = GetAlignedBuffer(kPageSize);
+  static thread_local char *idx_buf = GetAlignedBuffer(k1KB);
+  static thread_local char *data_buf = GetAlignedBuffer(kPageSize);
+  static thread_local char path[64];
+  static thread_local int idx_i = 0; // 1K page, just write 1K move forward.
 
   if (m_thread_id == 0xffff) {
     auto thread_pid = pthread_self();
@@ -342,51 +344,41 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     }
 
     // need to create the thread dir.
-    mkdir(index_dir(m_thread_id).c_str(), 0755);
-    mkdir(data_dir(m_thread_id).c_str(), 0755);
+    sprintf(path, "%sindex/%d", file_name_.c_str(), m_thread_id);
+    mkdir(path, 0755);
+    sprintf(path, "%sdata/%d", file_name_.c_str(), m_thread_id);
+    mkdir(path, 0755);
+
+    // TODO: this need to find out the last index of index file and data file.
+    // in real project.
+    idx_no++;
+    sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
+    DEBUG << "open index file = " << path << std::endl;
+    idx_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT | O_NONBLOCK, 0644);
+    posix_fallocate(idx_fd, 0, kMaxFileSize);
+
+    data_no++;
+    sprintf(path, "%sdata/%d/%d", file_name_.c_str(), m_thread_id, data_no);
+    DEBUG << "open data file = " << path << std::endl;
+    data_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT | O_NONBLOCK, 0644);
+    posix_fallocate(data_fd, 0, kMaxFileSize);
   }
 
-  // is need to create new file?
-  auto create_file = [](const char *file_name, bool direct, bool nonblock) ->int {
-      auto flag = O_WRONLY | O_CREAT;
-      if (direct) {
-        flag |= O_DIRECT;
-      }
-      if (nonblock) {
-        flag |= O_NONBLOCK;
-      }
-
-      int fd = open(file_name, flag, 0644);
-      if (fd < 0) {
-        DEBUG << "open inex file " << file_name << "failed\n";
-        return -1;
-      }
-      // pre alloc the file data.
-      auto ret = posix_fallocate(fd, 0, kMaxFileSize);
-      if (ret) {
-        DEBUG << "posix_fallocate failed, ret = " << ret << std::endl;
-        return -1;
-      }
-      return fd;
-  };
-
-  if (idx_fd == -1 || (idx_size + sizeof(struct disk_index)) > kMaxFileSize) {
+  if ((idx_size + sizeof(struct disk_index)) > kMaxFileSize) {
     idx_no++;
-    if (idx_fd > 0) {
-      close(idx_fd);
-    }
-    auto idx_name = index_dir(m_thread_id) + "/" + std::to_string(idx_no);
-    idx_fd = create_file(idx_name.c_str(), false/*with_cache*/, true/*non_block*/);
+    close(idx_fd);
+    sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
+    idx_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT | O_NONBLOCK, 0644);
+    posix_fallocate(idx_fd, 0, kMaxFileSize);
     idx_size = 0;
   }
 
-  if(data_fd == -1 || (data_size + kPageSize) > kMaxFileSize) {
+  if((data_size + kPageSize) > kMaxFileSize) {
     data_no++;
-    if (data_fd > 0) {
-      close(data_fd);
-    }
-    auto data_name = data_dir(m_thread_id) + "/" + std::to_string(data_no);
-    data_fd = create_file(data_name.c_str(), true/*direct*/, true/*block*/);
+    close(data_fd);
+    sprintf(path, "%sdata/%d/%d", file_name_.c_str(), m_thread_id, data_no);
+    data_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT | O_NONBLOCK, 0644);
+    posix_fallocate(data_fd, 0, kMaxFileSize);
     data_size = 0;
   }
 
@@ -394,17 +386,26 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   di.key = toKey(key);
   di.file_no = (m_thread_id<<16) | data_no;
   di.file_offset = data_size;
-  write(idx_fd, &di, sizeof(struct disk_index)); // non-block io, ignore the write return value.
+
+  struct disk_index *head = (struct disk_index*)idx_buf;
+  head[idx_i++] = di; idx_i %= 64;
+
+  // begin to write the index.
+  // 1. move
+  auto pos = idx_size - (idx_size & 1023);
+  lseek(idx_fd, pos, SEEK_SET);
+  // 2. then write.
+  write(idx_fd, head, k1KB);
+  idx_size += sizeof(struct disk_index);
 
   // check the address is aligned or not?
   const uint64_t addr = (const uint64_t)(value.ToString().c_str());
   if (addr & 4095) {
-    memcpy(buf, value.ToString().c_str(), kPageSize);
-    write(data_fd, buf, kPageSize);
+    memcpy(data_buf, value.ToString().c_str(), kPageSize);
+    write(data_fd, data_buf, kPageSize);
   } else {
     write(data_fd, value.ToString().c_str(), kPageSize);
   }
-  fdatasync(idx_fd);
   data_size += kPageSize;
   return kSucc;
 }
