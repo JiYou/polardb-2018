@@ -67,10 +67,8 @@ struct disk_index {
 class HashTreeTable {
  public:
   RetCode GetNoLock(const std::string &key, uint32_t *file_no, uint32_t *file_offset); // no_lock
-  RetCode SetNoLock(const std::string &key, uint32_t file_no, uint32_t file_offset); // no_lock
   RetCode GetNoLock(const char* key, uint32_t *file_no, uint32_t *file_offset); // no_lock
-  RetCode SetNoLock(const char* key, uint32_t file_no, uint32_t file_offset); // no_lock
-  RetCode SetNoLock(const uint64_t key, uint32_t file_no, uint32_t file_offset); // no_lock
+  RetCode SetNoLock(const char* key, uint32_t file_no, uint32_t file_offset, spinlock *ar); // no_lock
 
   // NOTE: no lock here. Do not call it anywhere.
   // after load all the entries from disk,

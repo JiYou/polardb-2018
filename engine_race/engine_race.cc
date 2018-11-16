@@ -73,9 +73,14 @@ RetCode HashTreeTable::GetNoLock(const std::string &key, uint32_t *file_no, uint
   return GetNoLock(key.c_str(),  file_no, file_offset);
 }
 
-RetCode HashTreeTable::SetNoLock(const char *key, uint32_t file_no, uint32_t file_offset) {
+RetCode HashTreeTable::SetNoLock(const char *key, uint32_t file_no, uint32_t file_offset, spinlock *ar) {
   const int64_t *k = reinterpret_cast<const int64_t*>(key);
   const uint64_t array_pos = compute_pos(*k);
+
+  if (ar) {
+    ar[array_pos].lock();
+  }
+
   auto &vs = hash_[array_pos];
   struct disk_index *ptr = nullptr;
   auto ret = find(vs, *k, &ptr);
@@ -86,11 +91,12 @@ RetCode HashTreeTable::SetNoLock(const char *key, uint32_t file_no, uint32_t fil
     ptr->file_no = file_no;
     ptr->file_offset = file_offset;
   }
-  return kSucc;
-}
 
-RetCode HashTreeTable::SetNoLock(const std::string &key, uint32_t file_no, uint32_t file_offset) {
-  return SetNoLock(key.c_str(), file_no, file_offset);
+  if (ar) {
+    ar[array_pos].unlock();
+  }
+
+  return kSucc;
 }
 
 void HashTreeTable::Sort() {
@@ -192,6 +198,7 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 
 void EngineRace::BuildHashTable() {
   hash_.Init();
+  spinlock *shard_locks = new spinlock[kMaxBucketSize];
 
   std::vector<std::string> idx_dirs;
   std::string full_idx_dir = file_name_ + kMetaDirName;
@@ -199,13 +206,9 @@ void EngineRace::BuildHashTable() {
     DEBUG << "call GetDirFiles() failed: " << full_idx_dir << std::endl;
   }
 
-  std::mutex hash_lock;
-  int cnt = 0;
   auto insert_item = [&](const struct disk_index &di) {
-    std::unique_lock<std::mutex> l(hash_lock);
     const char *k = reinterpret_cast<const char*>(&(di.key));
-    hash_.SetNoLock(k, di.file_no, di.file_offset);
-    cnt++;
+    hash_.SetNoLock(k, di.file_no, di.file_offset, shard_locks);
   };
 
   auto init_hash_per_thread = [&](const std::string &fn) {
@@ -241,15 +244,10 @@ void EngineRace::BuildHashTable() {
     }
   };
 
-  std::vector<std::thread> vths;
+  std::vector<std::thread> thd_build_hash_list;
   for (auto &idx_dir: idx_dirs) {
-    vths.emplace_back(std::thread(init_hash_per_thread, idx_dir));
+    thd_build_hash_list.emplace_back(std::thread(init_hash_per_thread, idx_dir));
   }
-  for (auto &v: vths) {
-    v.join();
-  }
-
-  DEBUG << "total items: " << cnt << std::endl;
 
   // then open all the data_fds_;
   std::vector<std::string> data_dirs;
@@ -278,13 +276,19 @@ void EngineRace::BuildHashTable() {
     }
   };
 
-  vths.clear();
+  std::vector<std::thread> thd_list_data_fds;
   for (auto &d: data_dirs) {
-    vths.emplace_back(std::thread(deal_single_data_dir, d));
+    thd_list_data_fds.emplace_back(std::thread(deal_single_data_dir, d));
   }
-  for (auto &v: vths) {
+
+  for (auto &v: thd_build_hash_list) {
     v.join();
   }
+  for (auto &v: thd_list_data_fds) {
+    v.join();
+  }
+
+  delete [] shard_locks;
 }
 
 EngineRace::~EngineRace() {
@@ -391,8 +395,15 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   di.file_no = (m_thread_id<<16) | data_no;
   di.file_offset = data_size;
   write(idx_fd, &di, sizeof(struct disk_index)); // non-block io, ignore the write return value.
-  memcpy(buf, value.ToString().c_str(), kPageSize);
-  write(data_fd, buf, kPageSize);
+
+  // check the address is aligned or not?
+  const uint64_t addr = (const uint64_t)(value.ToString().c_str());
+  if (addr & 4095) {
+    memcpy(buf, value.ToString().c_str(), kPageSize);
+    write(data_fd, buf, kPageSize);
+  } else {
+    write(data_fd, value.ToString().c_str(), kPageSize);
+  }
   fdatasync(idx_fd);
   data_size += kPageSize;
   return kSucc;
