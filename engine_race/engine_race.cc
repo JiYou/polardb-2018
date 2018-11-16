@@ -290,6 +290,17 @@ EngineRace::~EngineRace() {
   std::cout << "Total Time " << diff.count() / kNanoToMS << " (micro second)" << std::endl;
 }
 
+// get the index dir name.
+std::string EngineRace::index_dir(int thread_id) {
+  std::string index_dir = file_name_ + kMetaDirName + "/" + std::to_string(thread_id);
+  return index_dir;
+}
+
+std::string EngineRace::data_dir(int thread_id) {
+  std::string data_dir = file_name_ + kDataDirName + "/" + std::to_string(thread_id);
+  return data_dir;
+}
+
 void EngineRace::WriteEntry() {
   std::vector<write_item*> vs(64, nullptr);
   uint64_t idx_size = 0;
@@ -406,7 +417,17 @@ void EngineRace::start_write_thread() {
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   start_write_thread();
 
-  static thread_local uint64_t m_thread_id = 0xffff;
+  static thread_local int m_thread_id = 0xffff;
+  static thread_local int idx_no = -1;
+  static thread_local int data_no = 0;
+  // TODO: after the program exit, need to close the fd & free buffer.
+  static thread_local int idx_fd = -1;
+  static thread_local int data_fd = -1; // data file index start from 1, to help on invalid check.
+  static thread_local uint64_t idx_size = 0;
+  static thread_local uint64_t data_size = 0;
+  static thread_local struct disk_index di;
+  static thread_local struct aio_env_single write_aio(-1, false/*write*/, true/*alloc_buf*/);
+
   if (m_thread_id == 0xffff) {
     auto thread_pid = pthread_self();
     cpu_set_t cpuset;
@@ -417,17 +438,74 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     if (rc != 0) {
       std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
     }
+
+    // need to create the thread dir.
+    mkdir(index_dir(m_thread_id).c_str(), 0755);
+    mkdir(data_dir(m_thread_id).c_str(), 0755);
   }
 
-  // TODO: add write cache hit system ?
-  // if hit the previous value.
-  write_item w(&key, &value);
-  write_queue_.Push(&w);
+  // is need to create new file?
+  auto create_file = [](const char *file_name, bool direct, bool nonblock) ->int {
+      auto flag = O_WRONLY | O_CREAT;
+      if (direct) {
+        flag |= O_DIRECT;
+      }
+      if (nonblock) {
+        flag |= O_NONBLOCK;
+      }
 
-  // wait the request writen to disk.
-  std::unique_lock<std::mutex> l(w.lock_);
-  w.cond_.wait(l, [&w] { return w.is_done; });
-  return w.ret_code;
+      int fd = open(file_name, flag, 0644);
+      if (fd < 0) {
+        DEBUG << "open inex file " << file_name << "failed\n";
+        return -1;
+      }
+      // pre alloc the file data.
+      auto ret = posix_fallocate(fd, 0, kMaxFileSize);
+      if (ret) {
+        DEBUG << "posix_fallocate failed, ret = " << ret << std::endl;
+        return -1;
+      }
+      return fd;
+  };
+
+  if (idx_fd == -1 || (idx_size + sizeof(struct disk_index)) > kMaxFileSize) {
+    idx_no++;
+    if (idx_fd > 0) {
+      close(idx_fd);
+    }
+    auto idx_name = index_dir(m_thread_id) + "/" + std::to_string(idx_no);
+    idx_fd = create_file(idx_name.c_str(), false/*with_cache*/, false/*block*/);
+    idx_size = 0;
+  }
+
+  if(data_fd == -1 || (data_size + kPageSize) > kMaxFileSize) {
+    data_no++;
+    if (data_fd > 0) {
+      close(data_fd);
+    }
+    auto data_name = data_dir(m_thread_id) + "/" + std::to_string(data_no);
+    data_fd = create_file(data_name.c_str(), true/*direct*/, false/*block*/);
+    data_size = 0;
+    write_aio.SetFD(data_fd);
+  }
+
+  // write the position first.
+  di.key = toKey(key);
+  di.file_no = (m_thread_id<<16) | data_no;
+  di.file_offset = data_size;
+  if (write(idx_fd, &di, sizeof(struct disk_index)) != sizeof(struct disk_index)) {
+    return kIOError;
+  }
+  // then begin to write data.
+  // index_fd is buffered io.
+  // data_fd is aio.
+  memcpy(write_aio.buf, value.ToString().c_str(), kPageSize);
+  write_aio.Prepare(data_size);
+  write_aio.Submit();
+  // wait the index write over.
+  fdatasync(idx_fd);
+  write_aio.WaitOver();
+  return kSucc;
 }
 
 // for 64 read threads, it would take 64MB as cache read.

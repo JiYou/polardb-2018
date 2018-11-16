@@ -50,7 +50,16 @@ struct disk_index {
   }
 
   bool is_valid() const {
-    return !(file_no == 0xffff && file_offset == 0xffff);
+    return !(file_no == 0xffffffff && file_offset == 0xffffffff);
+  }
+  void set_file_no(int thread_id, int fn) {
+    file_no = (thread_id<<16) | fn;
+  }
+  int get_thrad_id() const {
+    return file_no >> 16;
+  }
+  int get_file_no() const {
+    return file_no & 0xffff;
   }
 };
 #pragma pack(pop)
@@ -456,6 +465,10 @@ class EngineRace : public Engine  {
   void WriteEntry();
   void start_write_thread();
   std::string file_name_;
+  // every writer just write content into
+  // the thread id related dir.
+  std::string data_dir(int thread_id);
+  std::string index_dir(int thread_id);
 
  private:
   std::string dir_;
