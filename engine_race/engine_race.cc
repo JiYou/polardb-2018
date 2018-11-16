@@ -324,7 +324,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   static thread_local uint64_t idx_size = 0;
   static thread_local uint64_t data_size = 0;
   static thread_local struct disk_index di;
-  static thread_local struct aio_env_single write_aio(-1, false/*write*/, true/*alloc_buf*/);
+  static thread_local char *buf = GetAlignedBuffer(kPageSize);
 
   if (m_thread_id == 0xffff) {
     auto thread_pid = pthread_self();
@@ -340,7 +340,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     // need to create the thread dir.
     mkdir(index_dir(m_thread_id).c_str(), 0755);
     mkdir(data_dir(m_thread_id).c_str(), 0755);
-    std::cout << "write thread " << m_thread_id << std::endl;
   }
 
   // is need to create new file?
@@ -373,7 +372,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
       close(idx_fd);
     }
     auto idx_name = index_dir(m_thread_id) + "/" + std::to_string(idx_no);
-    idx_fd = create_file(idx_name.c_str(), false/*with_cache*/, false/*block*/);
+    idx_fd = create_file(idx_name.c_str(), false/*with_cache*/, true/*non_block*/);
     idx_size = 0;
   }
 
@@ -383,30 +382,17 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
       close(data_fd);
     }
     auto data_name = data_dir(m_thread_id) + "/" + std::to_string(data_no);
-    data_fd = create_file(data_name.c_str(), true/*direct*/, false/*block*/);
+    data_fd = create_file(data_name.c_str(), true/*direct*/, true/*block*/);
     data_size = 0;
-    write_aio.SetFD(data_fd);
   }
 
   // write the position first.
   di.key = toKey(key);
   di.file_no = (m_thread_id<<16) | data_no;
   di.file_offset = data_size;
-  if (write(idx_fd, &di, sizeof(struct disk_index)) != sizeof(struct disk_index)) {
-    return kIOError;
-  }
-  // then begin to write data.
-  // index_fd is buffered io.
-  // data_fd is aio.
-  if (write_aio.write_over == false) {
-    write_aio.WaitOver();
-  }
-  memcpy(write_aio.buf, value.ToString().c_str(), kPageSize);
-  write_aio.Prepare(data_size);
-
-  // TODO use non-block write into OS.
-  write_aio.Submit();
-  // wait the index write over.
+  write(idx_fd, &di, sizeof(struct disk_index)); // non-block io, ignore the write return value.
+  memcpy(buf, value.ToString().c_str(), kPageSize);
+  write(data_fd, buf, kPageSize);
   fdatasync(idx_fd);
   data_size += kPageSize;
   return kSucc;
