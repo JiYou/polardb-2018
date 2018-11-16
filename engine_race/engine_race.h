@@ -441,11 +441,9 @@ class EngineRace : public Engine  {
  public:
   static RetCode Open(const std::string& name, Engine** eptr);
 
-  explicit EngineRace(const std::string& dir,
-                      size_t write_queue_size=kMaxQueueSize)
+  explicit EngineRace(const std::string& dir)
     : dir_(dir),
-    db_lock_(nullptr),
-    write_queue_(write_queue_size) {
+    db_lock_(nullptr) {
   }
 
   virtual ~EngineRace();
@@ -462,8 +460,6 @@ class EngineRace : public Engine  {
 
  private:
   void BuildHashTable();
-  void WriteEntry();
-  void start_write_thread();
   std::string file_name_;
   // every writer just write content into
   // the thread id related dir.
@@ -473,10 +469,6 @@ class EngineRace : public Engine  {
  private:
   std::string dir_;
   FileLock* db_lock_;
-
-  // control of the write_queue.
-  std::atomic<bool> stop_{false};
-  Queue<write_item> write_queue_;
 
   // hash tree table.
   HashTreeTable hash_;

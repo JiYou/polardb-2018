@@ -225,32 +225,20 @@ void EngineRace::BuildHashTable() {
     );
 
     // read all the files.
-    char *buf = GetAlignedBuffer(kMaxFileSize);
-    struct aio_env_single read_aio(-1, true/*read*/, false/*no_alloc*/);
     for (auto &fn: files) {
       auto file_name = sub_idx_dir + "/" + fn;
       // TODO: use NON_BLOCK read,
       // know how many bytes have been read, then deal with them.
-      auto fd = open(file_name.c_str(), O_RDONLY|O_DIRECT, 0644);
-      read_aio.SetFD(fd);
-      read_aio.Prepare100MB(0, buf);
-      read_aio.Submit();
-      read_aio.WaitOver();
-
-      // begin to insert into buffer.
-      // TODO: need to deal with when
-      // when the last index file is less than 100MB
-      struct disk_index *di = (struct disk_index*)buf;
-      for (uint32_t i = 0; i < kMaxFileSize / sizeof(struct disk_index); i++) {
-        auto &ref = di[i];
-        if (ref.key == 0 && ref.file_no == 0 && ref.file_offset == 0) {
+      auto fd = open(file_name.c_str(), O_RDONLY, 0644);
+      struct disk_index di;
+      while (read(fd, &di, sizeof(disk_index)) == sizeof(struct disk_index)) {
+        if (di.key == 0 && di.file_no == 0 && di.file_offset == 0) {
           break;
         }
-        insert_item(ref);
+        insert_item(di);
       }
       close(fd);
     }
-    free(buf);
   };
 
   std::vector<std::thread> vths;
@@ -300,7 +288,6 @@ void EngineRace::BuildHashTable() {
 }
 
 EngineRace::~EngineRace() {
-  stop_ = true;
   if (db_lock_) {
     UnlockFile(db_lock_);
   }
@@ -327,122 +314,7 @@ std::string EngineRace::data_dir(int thread_id) {
   return data_dir;
 }
 
-void EngineRace::WriteEntry() {
-  std::vector<write_item*> vs(64, nullptr);
-  uint64_t idx_size = 0;
-  uint64_t data_size = 0;
-  struct aio_env_two aio;
-
-  // write file every time from the start
-  int64_t idx_no = -1;
-  int64_t data_no = 0;
-  int idx_fd = -1;
-  int data_fd = -1;
-
-  while (!stop_) {
-    write_queue_.Pop(&vs);
-
-    auto create_file = [](const char *file_name) ->int {
-        int fd = open(file_name, O_RDWR | O_CREAT | O_DIRECT, 0644);
-        if (fd < 0) {
-          DEBUG << "open inex file " << file_name << "failed\n";
-          return -1;
-        }
-        // pre alloc the file data.
-        auto ret = posix_fallocate(fd, 0, kMaxFileSize);
-        if (ret) {
-          DEBUG << "posix_fallocate failed, ret = " << ret << std::endl;
-          return -1;
-        }
-        return fd;
-    };
-
-    auto cr_fd = [&]() {
-      if (idx_fd == -1 || (idx_size + k1KB) > kMaxFileSize) {
-        idx_no++;
-        auto idx_name = file_name_ + kMetaDirName + "/" + std::to_string(idx_no);
-        if (idx_fd > 0) {
-          close(idx_fd);
-        }
-        idx_fd = create_file(idx_name.c_str());
-        idx_size = 0;
-      }
-
-      if(data_fd == -1 || (data_size + k256KB) > kMaxFileSize) {
-        data_no++;
-        auto data_name = file_name_ + kDataDirName +"/" + std::to_string(data_no);
-        if (data_fd > 0) {
-          close(data_fd);
-        }
-        data_fd = create_file(data_name.c_str());
-        data_size = 0;
-      }
-    };
-    cr_fd();
-
-    struct disk_index *di = reinterpret_cast<struct disk_index*>(aio.index_buf);
-    char *to = aio.data_buf;
-    auto file_pos = data_size;
-    auto cp_mem = [&]() {
-      for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
-        if (i < vs.size()) {
-          auto &x = vs[i];
-          di->key = toKey(x->key->ToString().c_str());
-          di->file_no = data_no;
-          di->file_offset = file_pos;
-          di++;
-          memcpy(to, x->value->ToString().c_str(), kPageSize);
-          to += kPageSize;
-          file_pos += kPageSize;
-        } else {
-          di->key = 0;
-          di->file_no = 0xffffffff;
-          di->file_offset = 0xffffffff;
-          di++;
-        }
-      }
-    };
-    cp_mem();
-
-    auto f = std::async(std::launch::async, [&]() {
-      aio.Clear();
-      aio.PrepareWrite(idx_fd, idx_size, aio.index_buf, k1KB);
-      aio.PrepareWrite(data_fd, data_size, aio.data_buf, k256KB);
-      aio.Submit();
-      idx_size += k1KB;
-      data_size += k256KB;
-    });
-
-    for (auto &x: vs) {
-      x->feed_back();
-    }
-    f.get();
-    aio.WaitOver();
-  }
-
-  close(idx_fd);
-  close(data_fd);
-}
-
-void EngineRace::start_write_thread() {
-  static std::once_flag initialized_write;
-  std::call_once (initialized_write, [this] {
-    std::thread write_thread(&EngineRace::WriteEntry, this);
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    CPU_SET(0, &cpuset);
-    auto thread_pid = write_thread.native_handle();
-    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
-    if (rc != 0) {
-      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
-    }
-    write_thread.detach();
-  });
-}
-
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
-  start_write_thread();
-
   static thread_local int m_thread_id = 0xffff;
   static thread_local int idx_no = -1;
   static thread_local int data_no = 0;
@@ -468,6 +340,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     // need to create the thread dir.
     mkdir(index_dir(m_thread_id).c_str(), 0755);
     mkdir(data_dir(m_thread_id).c_str(), 0755);
+    std::cout << "write thread " << m_thread_id << std::endl;
   }
 
   // is need to create new file?
