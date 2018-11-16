@@ -51,9 +51,11 @@ test/read_index
 test/single_test
 test/succ_test
 test/mmap_test
+test/non_block
 
 # running logs
 log_195147.tar
 log_195147/
 log_195147
 log_195147*
+
