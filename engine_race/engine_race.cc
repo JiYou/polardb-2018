@@ -398,6 +398,9 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   // then begin to write data.
   // index_fd is buffered io.
   // data_fd is aio.
+  if (write_aio.write_over == false) {
+    write_aio.WaitOver();
+  }
   memcpy(write_aio.buf, value.ToString().c_str(), kPageSize);
   write_aio.Prepare(data_size);
 
@@ -405,7 +408,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   write_aio.Submit();
   // wait the index write over.
   fdatasync(idx_fd);
-  write_aio.WaitOver();
   data_size += kPageSize;
   return kSucc;
 }
