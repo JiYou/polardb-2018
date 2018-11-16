@@ -469,3 +469,30 @@ static inline void io_prep_pwrite(struct iocb *iocb, int fd, void *buf, size_t c
   iocb->u.c.offset = offset;
 }
 ```
+
+# 多线程写入
+
+- 如何让多个线程之间并发协作共同写入
+  - class.flag atomic变量
+    初值为-1
+    // 有64个槽位
+    // 每个线程只处理自己的槽位
+    every thread::Write(){
+      int idx = flag++;
+      // set key,value in [idx]
+      if flag == 63 {  // 63 can be change to class.thread_id++;
+        I;m the write thrda.
+        use fd to write.
+        after write over,
+        flag = -1;
+      } else {
+        while(flag != -1) -> just busy wait.
+      }
+    }
+
+- parallel to generate the hash
+  - t1: deal 0, 64, 128, ....
+    t2:      1, 65, 129, .....
+    t64:     63, .....
+
+- cache all the key/value, then write into single index big file.
