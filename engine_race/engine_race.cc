@@ -193,85 +193,109 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 void EngineRace::BuildHashTable() {
   hash_.Init();
 
-  // scan all the files under the folder.
-  std::vector<std::string> files;
-  // scan the index file dir.
-  std::string dir = file_name_ + kMetaDirName;
-  if (0 != GetDirFiles(dir, &files)) {
-    DEBUG << "call GetDirFiles() failed: " << dir << std::endl;
+  std::vector<std::string> idx_dirs;
+  std::string full_idx_dir = file_name_ + kMetaDirName;
+  if (0 != GetDirFiles(full_idx_dir, &idx_dirs)) {
+    DEBUG << "call GetDirFiles() failed: " << full_idx_dir << std::endl;
   }
 
-  // sort the meta files.
-  std::sort(files.begin(), files.end(),
-    [](const std::string &a, const std::string &b) {
-      const int va = atoi(a.c_str());
-      const int vb = atoi(b.c_str());
-      return va < vb;
+  std::mutex hash_lock;
+  int cnt = 0;
+  auto insert_item = [&](const struct disk_index &di) {
+    std::unique_lock<std::mutex> l(hash_lock);
+    const char *k = reinterpret_cast<const char*>(&(di.key));
+    hash_.SetNoLock(k, di.file_no, di.file_offset);
+    cnt++;
+  };
+
+  auto init_hash_per_thread = [&](const std::string &fn) {
+    // open the folder.
+    std::string sub_idx_dir = full_idx_dir + "/" + fn;
+    std::vector<std::string> files;
+    if (0 != GetDirFiles(sub_idx_dir, &files)) {
+      DEBUG << "call GetDirFiles() failed: " << sub_idx_dir << std::endl;
     }
-  );
-
-  // read all the files into hash table.
-  char *buf = GetAlignedBuffer(kMaxFileSize + 32);
-  if (!buf) {
-    DEBUG << "alloc memory for buf failed\n";
-    return;
-  }
-
-  struct aio_env_single read_aio(-1, true/*read*/, false/*nobuf*/);
-  uint64_t cnt = 0;
-
-  for (auto fn: files) {
-    // read all the conten from file.
-    auto file_name = file_name_ + kMetaDirName + "/" + fn;
-    auto fd = open(file_name.c_str(), O_RDONLY|O_DIRECT, 0644);
-    if (fd < 0) {
-      DEBUG << "can not open file: " << file_name << std::endl;
-      return;
-    }
-
-    read_aio.SetFD(fd);
-    read_aio.Prepare100MB(0, buf);
-    read_aio.Submit();
-    read_aio.WaitOver();
-
-    struct disk_index *di = (struct disk_index*)buf;
-    for (uint64_t i = 0; i < kMaxFileSize / sizeof(struct disk_index); i++) {
-      auto ref = di[i];
-      if (ref.file_no == 0 && ref.file_offset == 0) {
-        break;
+    // sort the meta files.
+    std::sort(files.begin(), files.end(),
+      [](const std::string &a, const std::string &b) {
+        const int va = atoi(a.c_str());
+        const int vb = atoi(b.c_str());
+        return va < vb;
       }
-      if (!ref.is_valid()) {
-        continue;
+    );
+
+    // read all the files.
+    char *buf = GetAlignedBuffer(kMaxFileSize);
+    struct aio_env_single read_aio(-1, true/*read*/, false/*no_alloc*/);
+    for (auto &fn: files) {
+      auto file_name = sub_idx_dir + "/" + fn;
+      // TODO: use NON_BLOCK read,
+      // know how many bytes have been read, then deal with them.
+      auto fd = open(file_name.c_str(), O_RDONLY|O_DIRECT, 0644);
+      read_aio.SetFD(fd);
+      read_aio.Prepare100MB(0, buf);
+      read_aio.Submit();
+      read_aio.WaitOver();
+
+      // begin to insert into buffer.
+      // TODO: need to deal with when
+      // when the last index file is less than 100MB
+      struct disk_index *di = (struct disk_index*)buf;
+      for (uint32_t i = 0; i < kMaxFileSize / sizeof(struct disk_index); i++) {
+        auto &ref = di[i];
+        if (ref.key == 0 && ref.file_no == 0 && ref.file_offset == 0) {
+          break;
+        }
+        insert_item(ref);
       }
-      cnt++;
-      const char *k = reinterpret_cast<const char*>(&(ref.key));
-      hash_.SetNoLock(k, ref.file_no, ref.file_offset);
+      close(fd);
     }
-    // NOTE: if the file is less than 100MB, need to clear the memory.
+    free(buf);
+  };
 
-    DEBUG << "item = " << cnt << std::endl;
-
-    close(fd);
+  std::vector<std::thread> vths;
+  for (auto &idx_dir: idx_dirs) {
+    vths.emplace_back(std::thread(init_hash_per_thread, idx_dir));
+  }
+  for (auto &v: vths) {
+    v.join();
   }
 
-  free(buf);
+  DEBUG << "total items: " << cnt << std::endl;
 
   // then open all the data_fds_;
-  files.clear();
-  dir = file_name_ + kDataDirName;
-  if (0 != GetDirFiles(dir, &files)) {
-    DEBUG << "call GetDirFiles() failed: " << dir << std::endl;
+  std::vector<std::string> data_dirs;
+  std::string full_data_dir = file_name_ + kDataDirName;
+  if (0 != GetDirFiles(full_data_dir, &data_dirs)) {
+    DEBUG << "call GetDirFiles() failed: " << full_data_dir << std::endl;
   }
-  data_fds_.resize(files.size() + 1, 0);
+  data_fds_.resize(data_dirs.size() + 1);
 
-  for (auto &fn : files) {
-    std::string file_name = file_name_ + kDataDirName + "/" + fn;
-    auto fd = open(file_name.c_str(), O_RDONLY|O_DIRECT, 0644);
-    if (fd < 0) {
-      DEBUG << "can not open file " << file_name << std::endl;
-      return;
+  auto deal_single_data_dir = [&](const std::string &dn) {
+    std::vector<std::string> files;
+    std::string sub_dir_name = full_data_dir + "/" + dn;
+    if (0 != GetDirFiles(sub_dir_name, &files)) {
+      DEBUG << "call GetDirFiles() failed: " << sub_dir_name << std::endl;
     }
-    data_fds_[atoi(fn.c_str())] = fd;
+    int x = atoi(dn.c_str());
+    data_fds_[x].resize(files.size()+1);
+    for (auto &f: files) {
+      auto file_name = sub_dir_name + "/" + f;
+      auto fd = open(file_name.c_str(), O_RDONLY|O_DIRECT, 0644);
+      if (fd < 0) {
+        DEBUG << "can not open file " << file_name << std::endl;
+        return;
+      }
+      data_fds_[x][atoi(f.c_str())] = fd;
+    }
+  };
+
+  vths.clear();
+  for (auto &d: data_dirs) {
+    vths.emplace_back(std::thread(deal_single_data_dir, d));
+  }
+  for (auto &v: vths) {
+    v.join();
   }
 }
 
@@ -281,8 +305,10 @@ EngineRace::~EngineRace() {
     UnlockFile(db_lock_);
   }
 
-  for (auto &fd: data_fds_) {
-    close(fd);
+  for (auto &v: data_fds_) {
+    for (auto &x: v) {
+      close(x);
+    }
   }
 
   end_ = std::chrono::system_clock::now();
@@ -501,10 +527,13 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   // data_fd is aio.
   memcpy(write_aio.buf, value.ToString().c_str(), kPageSize);
   write_aio.Prepare(data_size);
+
+  // TODO use non-block write into OS.
   write_aio.Submit();
   // wait the index write over.
   fdatasync(idx_fd);
   write_aio.WaitOver();
+  data_size += kPageSize;
   return kSucc;
 }
 
@@ -543,8 +572,13 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   if (ret != kSucc) {
     return kNotFound;
   }
+
+  // then begin to get the data dir.
+  int data_dir = file_no >> 16;
+  int sub_file_no = file_no & 0xffff;
   // begin to find the key & pos
-  read_aio.SetFD(data_fds_[file_no]);
+  // TODO use non-block read to count the bytes read then copy to value.
+  read_aio.SetFD(data_fds_[data_dir][sub_file_no]);
   read_aio.Prepare(file_offset);
   read_aio.Submit();
   read_aio.WaitOver();

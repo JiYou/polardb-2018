@@ -37,16 +37,14 @@ int main() {
     if (read(fd, &di, 16) != 16) {
       break;
     }
-    if (di.file_no == 0xffff && di.file_offset == 0xffff) {
-      continue;
-    }
 
     if (di.file_no == 0 && di.file_offset == 0 && di.key == 0) {
       break;
     }
     cnt++;
-    std::cout << di.key << " = " << di.file_no << ":" << di.file_offset << std::endl;
+    printf("%llx %d-%d %d\n", di.key, di.file_no >> 16, di.file_no & 0xffff, di.file_offset);
   }
+
   std::cout << "read over: cnt = " << cnt << std::endl;
   close(fd);
   return 0;

@@ -496,7 +496,7 @@ class EngineRace : public Engine  {
   std::atomic<uint64_t> thread_id_{0};
 
   // open all the data files.
-  std::vector<int> data_fds_;
+  std::vector<std::vector<int>> data_fds_;
 
   // time counter
   decltype(std::chrono::system_clock::now()) begin_;
