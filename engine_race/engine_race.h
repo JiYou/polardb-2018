@@ -478,8 +478,9 @@ class EngineRace : public Engine  {
 
   // use to pin cpu on core.
   uint64_t max_cpu_cnt_ = 0;
-  std::atomic<uint64_t> cpu_id_{0};
-  std::atomic<uint64_t> kv_cnt_{0};
+  // tag for the thread id,
+  // just increase.
+  std::atomic<uint64_t> thread_id_{0};
 
   // open all the data files.
   std::vector<int> data_fds_;

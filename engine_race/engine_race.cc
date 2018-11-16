@@ -406,13 +406,13 @@ void EngineRace::start_write_thread() {
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   start_write_thread();
 
-  static thread_local uint64_t m_cpu_id = 0xffff;
-  if (m_cpu_id == 0xffff) {
+  static thread_local uint64_t m_thread_id = 0xffff;
+  if (m_thread_id == 0xffff) {
     auto thread_pid = pthread_self();
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    m_cpu_id = cpu_id_++;
-    CPU_SET(m_cpu_id % max_cpu_cnt_, &cpuset);
+    m_thread_id = thread_id_++;
+    CPU_SET(m_thread_id % max_cpu_cnt_, &cpuset);
     int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
     if (rc != 0) {
       std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
@@ -445,13 +445,13 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     END_POINT(end_sort_hash_table, begin_sort_hash_table, "hash_sort_time");
   });
 
-  static thread_local uint64_t m_cpu_id = 0xffff;
-  if (m_cpu_id == 0xffff) {
+  static thread_local uint64_t m_thread_id = 0xffff;
+  if (m_thread_id == 0xffff) {
     auto thread_pid = pthread_self();
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    m_cpu_id = cpu_id_++;
-    CPU_SET(m_cpu_id % max_cpu_cnt_, &cpuset);
+    m_thread_id = thread_id_++;
+    CPU_SET(m_thread_id % max_cpu_cnt_, &cpuset);
     int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
     if (rc != 0) {
       std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
