@@ -318,7 +318,17 @@ std::string EngineRace::data_dir(int thread_id) {
   return data_dir;
 }
 
+
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
+  struct fd_wrapper {
+    int fd = -1;
+    ~fd_wrapper() {
+      if (-1 != fd) {
+        fdatasync(fd);
+        close(fd);
+      }
+    }
+  };
   static thread_local int m_thread_id = 0xffff;
   static thread_local int idx_no = -1;
   static thread_local int data_no = 0;
@@ -328,6 +338,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   static thread_local uint64_t data_size = 0;
   static thread_local char path[64];
   static thread_local char *data_buf = GetAlignedBuffer(kPageSize);
+  static thread_local struct fd_wrapper fw;
 
   if (m_thread_id == 0xffff) {
     auto thread_pid = pthread_self();
@@ -350,7 +361,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     // in real project.
     idx_no++;
     sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
-    idx_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
+    idx_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644); fw.fd = idx_fd;
     posix_fallocate(idx_fd, 0, kMaxFileSize);
 
     data_no++;
@@ -363,7 +374,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     idx_no++;
     close(idx_fd);
     sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
-    idx_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
+    idx_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644); fw.fd = idx_fd;
     posix_fallocate(idx_fd, 0, kMaxFileSize);
     idx_size = 0;
   }
