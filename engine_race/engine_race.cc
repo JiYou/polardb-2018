@@ -200,7 +200,8 @@ void EngineRace::BuildHashTable() {
   hash_.Init();
   spinlock *shard_locks = new spinlock[kMaxBucketSize];
 
-  std::vector<std::string> idx_dirs;
+  std::vector<std::string> idx_dirs(kMaxThreadNumber);
+  idx_dirs.clear();
   std::string full_idx_dir = file_name_ + kMetaDirName;
   if (0 != GetDirFiles(full_idx_dir, &idx_dirs)) {
     DEBUG << "call GetDirFiles() failed: " << full_idx_dir << std::endl;
@@ -213,8 +214,7 @@ void EngineRace::BuildHashTable() {
 
   auto init_hash_per_thread = [&](const std::string &fn) {
     // open the folder.
-    std::string sub_idx_dir = full_idx_dir + "/" + fn;
-    auto file_name = sub_idx_dir + "/0";
+    auto file_name = full_idx_dir + "/" + fn + "/0";
     auto fd = open(file_name.c_str(), O_RDONLY, 0644);
     struct disk_index di;
     while (read(fd, &di, sizeof(disk_index)) == sizeof(struct disk_index)) {
@@ -226,13 +226,15 @@ void EngineRace::BuildHashTable() {
     close(fd);
   };
 
-  std::vector<std::thread> thd_build_hash_list;
+  std::vector<std::thread> thread_list(kMaxThreadNumber << 1);
+  thread_list.clear();
   for (auto &idx_dir: idx_dirs) {
-    thd_build_hash_list.emplace_back(std::thread(init_hash_per_thread, idx_dir));
+    thread_list.emplace_back(std::thread(init_hash_per_thread, idx_dir));
   }
 
   // then open all the data_fds_;
-  std::vector<std::string> data_dirs;
+  std::vector<std::string> data_dirs(kMaxThreadNumber);
+  data_dirs.clear();
   std::string full_data_dir = file_name_ + kDataDirName;
   if (0 != GetDirFiles(full_data_dir, &data_dirs)) {
     DEBUG << "call GetDirFiles() failed: " << full_data_dir << std::endl;
@@ -240,7 +242,8 @@ void EngineRace::BuildHashTable() {
   data_fds_.resize(data_dirs.size() + 1);
 
   auto deal_single_data_dir = [&](const std::string &dn) {
-    std::vector<std::string> files;
+    std::vector<std::string> files(kMaxThreadNumber);
+    files.clear();
     std::string sub_dir_name = full_data_dir + "/" + dn;
     if (0 != GetDirFiles(sub_dir_name, &files)) {
       DEBUG << "call GetDirFiles() failed: " << sub_dir_name << std::endl;
@@ -258,15 +261,11 @@ void EngineRace::BuildHashTable() {
     }
   };
 
-  std::vector<std::thread> thd_list_data_fds;
   for (auto &d: data_dirs) {
-    thd_list_data_fds.emplace_back(std::thread(deal_single_data_dir, d));
+    thread_list.emplace_back(std::thread(deal_single_data_dir, d));
   }
 
-  for (auto &v: thd_build_hash_list) {
-    v.join();
-  }
-  for (auto &v: thd_list_data_fds) {
+  for (auto &v: thread_list) {
     v.join();
   }
 
