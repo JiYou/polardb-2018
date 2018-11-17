@@ -398,15 +398,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   // begin to write the index.
   write(idx_fd, &di, sizeof(struct disk_index));
   idx_size += sizeof(struct disk_index);
-
-  // check the address is aligned or not?
-  const uint64_t addr = (const uint64_t)(value.ToString().c_str());
-  if (addr & 4095) {
-    memcpy(data_buf, value.ToString().c_str(), kPageSize);
-    write(data_fd, data_buf, kPageSize);
-  } else {
-    write(data_fd, value.ToString().c_str(), kPageSize);
-  }
+  write(data_fd, value.ToString().c_str(), kPageSize);
   data_size += kPageSize;
   return kSucc;
 }
