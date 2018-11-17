@@ -338,7 +338,8 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   static thread_local uint64_t data_size = 0;
   static thread_local char path[64];
   static thread_local char *data_buf = GetAlignedBuffer(kPageSize);
-  static thread_local struct fd_wrapper fw;
+  static thread_local struct fd_wrapper idx_fw;
+  static thread_local struct fd_wrapper data_fw;
 
   if (m_thread_id == 0xffff) {
     auto thread_pid = pthread_self();
@@ -361,12 +362,12 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     // in real project.
     idx_no++;
     sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
-    idx_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644); fw.fd = idx_fd;
+    idx_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644); idx_fw.fd = idx_fd;
     posix_fallocate(idx_fd, 0, kMaxFileSize);
 
     data_no++;
     sprintf(path, "%sdata/%d/%d", file_name_.c_str(), m_thread_id, data_no);
-    data_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT | O_NONBLOCK, 0644);
+    data_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644); data_fw.fd = data_fd;
     posix_fallocate(data_fd, 0, kMaxFileSize);
   }
 
@@ -374,7 +375,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     idx_no++;
     close(idx_fd);
     sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
-    idx_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644); fw.fd = idx_fd;
+    idx_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644); idx_fw.fd = idx_fd;
     posix_fallocate(idx_fd, 0, kMaxFileSize);
     idx_size = 0;
   }
@@ -383,7 +384,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     data_no++;
     close(data_fd);
     sprintf(path, "%sdata/%d/%d", file_name_.c_str(), m_thread_id, data_no);
-    data_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT | O_NONBLOCK, 0644);
+    data_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644); data_fw.fd = data_fd;
     posix_fallocate(data_fd, 0, kMaxFileSize);
     data_size = 0;
   }
