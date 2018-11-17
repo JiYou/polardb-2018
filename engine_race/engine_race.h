@@ -223,7 +223,7 @@ struct aio_env_two {
     if (!index_buf) {
       DEBUG << "aligned memory for aio_2 index failed\n";
     }
-    data_buf = GetAlignedBuffer(k256KB); // 256KB for write data.
+    data_buf = GetAlignedBuffer(kPageSize); // 4KB for write data.
     if (!data_buf) {
       DEBUG << "ailgned memory for aio_2 data failed\n";
     }

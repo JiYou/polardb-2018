@@ -326,11 +326,9 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   static thread_local int data_fd = -1; // data file index start from 1, to help on invalid check.
   static thread_local uint64_t idx_size = 0;
   static thread_local uint64_t data_size = 0;
-  static thread_local struct disk_index di;
-  static thread_local char *idx_buf = GetAlignedBuffer(k1KB >> 1);
-  static thread_local char *data_buf = GetAlignedBuffer(kPageSize);
   static thread_local char path[64];
   static thread_local int idx_i = 0; // 1K page, just write 1K move forward.
+  static thread_local struct aio_env_two waio;
 
   if (m_thread_id == 0xffff) {
     auto thread_pid = pthread_self();
@@ -353,12 +351,12 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     // in real project.
     idx_no++;
     sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
-    idx_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT | O_NONBLOCK, 0644);
+    idx_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT, 0644);
     posix_fallocate(idx_fd, 0, kMaxFileSize);
 
     data_no++;
     sprintf(path, "%sdata/%d/%d", file_name_.c_str(), m_thread_id, data_no);
-    data_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT | O_NONBLOCK, 0644);
+    data_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT, 0644);
     posix_fallocate(data_fd, 0, kMaxFileSize);
   }
 
@@ -366,7 +364,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     idx_no++;
     close(idx_fd);
     sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
-    idx_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT | O_NONBLOCK, 0644);
+    idx_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT, 0644);
     posix_fallocate(idx_fd, 0, kMaxFileSize);
     idx_size = 0;
   }
@@ -375,36 +373,37 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     data_no++;
     close(data_fd);
     sprintf(path, "%sdata/%d/%d", file_name_.c_str(), m_thread_id, data_no);
-    data_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT | O_NONBLOCK, 0644);
+    data_fd = open(path, O_WRONLY | O_CREAT | O_DIRECT, 0644);
     posix_fallocate(data_fd, 0, kMaxFileSize);
     data_size = 0;
   }
 
   // write the position first.
+  struct disk_index *head = (struct disk_index*)waio.index_buf;
+  struct disk_index &di = head[idx_i++]; idx_i %= 64;
   di.key = toKey(key);
   di.file_no = (m_thread_id<<16) | data_no;
   di.file_offset = data_size;
 
-  struct disk_index *head = (struct disk_index*)idx_buf;
-  head[idx_i++] = di; idx_i %= 32;
-
   // begin to write the index.
   // 1. move
-  auto pos = idx_size - (idx_size & 511);
-  lseek(idx_fd, pos, SEEK_SET);
-  // 2. then write.
-  write(idx_fd, head, k1KB);
+  auto pos = idx_size - (idx_size & 1023);
+
+  waio.Clear();
+  waio.PrepareWrite(idx_fd, pos, waio.index_buf, k1KB);
   idx_size += sizeof(struct disk_index);
 
   // check the address is aligned or not?
   const uint64_t addr = (const uint64_t)(value.ToString().c_str());
   if (addr & 4095) {
-    memcpy(data_buf, value.ToString().c_str(), kPageSize);
-    write(data_fd, data_buf, kPageSize);
+    memcpy(waio.data_buf, value.ToString().c_str(), kPageSize);
+    waio.PrepareWrite(data_fd, data_size, waio.data_buf, kPageSize);
   } else {
-    write(data_fd, value.ToString().c_str(), kPageSize);
+    waio.PrepareWrite(data_fd, data_size, const_cast<char*>(value.ToString().c_str()), kPageSize);
   }
+  waio.Submit();
   data_size += kPageSize;
+  waio.WaitOver();
   return kSucc;
 }
 
