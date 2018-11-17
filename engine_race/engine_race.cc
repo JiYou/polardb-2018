@@ -332,25 +332,20 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   static thread_local int m_thread_id = 0xffff;
   static thread_local int idx_no = -1;
   static thread_local int data_no = 0;
-  static thread_local int idx_fd = -1;
-  static thread_local int data_fd = -1; // data file index start from 1, to help on invalid check.
   static thread_local uint64_t idx_size = 0;
-  static thread_local uint64_t data_size = 0;
   static thread_local char path[64];
-  static thread_local char *data_buf = GetAlignedBuffer(kPageSize);
-  static thread_local struct fd_wrapper idx_fw;
+  static thread_local struct fd_wrapper index_fw;
   static thread_local struct fd_wrapper data_fw;
+  static thread_local struct disk_index di;
 
+  di.key = *reinterpret_cast<const uint64_t*>(key.ToString().c_str());
   if (m_thread_id == 0xffff) {
     auto thread_pid = pthread_self();
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     m_thread_id = thread_id_++;
     CPU_SET(m_thread_id % max_cpu_cnt_, &cpuset);
-    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
-    if (rc != 0) {
-      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
-    }
+    pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
 
     // need to create the thread dir.
     sprintf(path, "%sindex/%d", file_name_.c_str(), m_thread_id);
@@ -362,44 +357,40 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     // in real project.
     idx_no++;
     sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
-    idx_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644); idx_fw.fd = idx_fd;
-    posix_fallocate(idx_fd, 0, kMaxFileSize);
+    index_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
+    posix_fallocate(index_fw.fd, 0, kMaxFileSize);
 
     data_no++;
     sprintf(path, "%sdata/%d/%d", file_name_.c_str(), m_thread_id, data_no);
-    data_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644); data_fw.fd = data_fd;
-    posix_fallocate(data_fd, 0, kMaxFileSize);
+    data_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
+    posix_fallocate(data_fw.fd, 0, kMaxFileSize);
+    di.file_no = (m_thread_id<<16) | data_no;
   }
 
   if ((idx_size + sizeof(struct disk_index)) > kMaxFileSize) {
     idx_no++;
-    close(idx_fd);
+    close(index_fw.fd);
     sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
-    idx_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644); idx_fw.fd = idx_fd;
-    posix_fallocate(idx_fd, 0, kMaxFileSize);
+    index_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
+    posix_fallocate(index_fw.fd, 0, kMaxFileSize);
     idx_size = 0;
   }
 
-  if((data_size + kPageSize) > kMaxFileSize) {
+  if((di.file_offset + kPageSize) > kMaxFileSize) {
     data_no++;
-    close(data_fd);
+    close(data_fw.fd);
     sprintf(path, "%sdata/%d/%d", file_name_.c_str(), m_thread_id, data_no);
-    data_fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644); data_fw.fd = data_fd;
-    posix_fallocate(data_fd, 0, kMaxFileSize);
-    data_size = 0;
+    data_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
+    posix_fallocate(data_fw.fd, 0, kMaxFileSize);
+    di.file_offset = 0;
+    di.file_no = (m_thread_id<<16) | data_no;
   }
 
-  // write the position first.
-  struct disk_index di;
-  di.key = toKey(key);
-  di.file_no = (m_thread_id<<16) | data_no;
-  di.file_offset = data_size;
-
   // begin to write the index.
-  write(idx_fd, &di, sizeof(struct disk_index));
+  write(index_fw.fd, &di, sizeof(struct disk_index));
   idx_size += sizeof(struct disk_index);
-  write(data_fd, value.ToString().c_str(), kPageSize);
-  data_size += kPageSize;
+  write(data_fw.fd, value.ToString().c_str(), kPageSize);
+  di.file_offset += kPageSize;
   return kSucc;
 }
 
