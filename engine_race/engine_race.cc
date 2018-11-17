@@ -214,34 +214,16 @@ void EngineRace::BuildHashTable() {
   auto init_hash_per_thread = [&](const std::string &fn) {
     // open the folder.
     std::string sub_idx_dir = full_idx_dir + "/" + fn;
-    std::vector<std::string> files;
-    if (0 != GetDirFiles(sub_idx_dir, &files)) {
-      DEBUG << "call GetDirFiles() failed: " << sub_idx_dir << std::endl;
-    }
-    // sort the meta files.
-    std::sort(files.begin(), files.end(),
-      [](const std::string &a, const std::string &b) {
-        const int va = atoi(a.c_str());
-        const int vb = atoi(b.c_str());
-        return va < vb;
+    auto file_name = sub_idx_dir + "/0";
+    auto fd = open(file_name.c_str(), O_RDONLY, 0644);
+    struct disk_index di;
+    while (read(fd, &di, sizeof(disk_index)) == sizeof(struct disk_index)) {
+      if (di.key == 0 && di.file_no == 0 && di.file_offset == 0) {
+        break;
       }
-    );
-
-    // read all the files.
-    for (auto &fn: files) {
-      auto file_name = sub_idx_dir + "/" + fn;
-      // TODO: use NON_BLOCK read,
-      // know how many bytes have been read, then deal with them.
-      auto fd = open(file_name.c_str(), O_RDONLY, 0644);
-      struct disk_index di;
-      while (read(fd, &di, sizeof(disk_index)) == sizeof(struct disk_index)) {
-        if (di.key == 0 && di.file_no == 0 && di.file_offset == 0) {
-          break;
-        }
-        insert_item(di);
-      }
-      close(fd);
+      insert_item(di);
     }
+    close(fd);
   };
 
   std::vector<std::thread> thd_build_hash_list;
@@ -367,14 +349,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     di.file_no = (m_thread_id<<16) | data_no;
   }
 
-  if ((idx_size + sizeof(struct disk_index)) > kMaxFileSize) {
-    idx_no++;
-    close(index_fw.fd);
-    sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
-    index_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
-    posix_fallocate(index_fw.fd, 0, kMaxFileSize);
-    idx_size = 0;
-  }
 
   if((di.file_offset + kPageSize) > kMaxFileSize) {
     data_no++;
