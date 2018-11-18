@@ -211,7 +211,7 @@ void EngineRace::BuildHashTable() {
   auto init_hash_per_thread = [&](const std::string &fn) {
     // open the folder.
     auto file_name = full_idx_dir + "/" + fn + "/0";
-    auto fd = open(file_name.c_str(), O_RDONLY, 0644);
+    auto fd = open(file_name.c_str(), O_RDONLY | O_NOATIME, 0644);
     struct disk_index di;
     while (read(fd, &di, sizeof(disk_index)) == sizeof(struct disk_index)) {
       if (di.key == 0 && di.file_no == 0 && di.file_offset == 0) {
@@ -248,7 +248,7 @@ void EngineRace::BuildHashTable() {
     data_fds_[x].resize(files.size()+1);
     for (auto &f: files) {
       auto file_name = sub_dir_name + "/" + f;
-      auto fd = open(file_name.c_str(), O_RDONLY|O_DIRECT, 0644);
+      auto fd = open(file_name.c_str(), O_RDONLY|O_DIRECT | O_NOATIME, 0644);
       if (fd < 0) {
         DEBUG << "can not open file " << file_name << std::endl;
         return;
@@ -334,12 +334,12 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     // in real project.
     idx_no++;
     sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
-    index_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
+    index_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK | O_NOATIME , 0644);
     posix_fallocate(index_fw.fd, 0, kMaxIndexFileSize);
 
     data_no++;
     sprintf(path, "%sdata/%d/%d", file_name_.c_str(), m_thread_id, data_no);
-    data_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
+    data_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK | O_NOATIME, 0644);
     posix_fallocate(data_fw.fd, 0, kMaxDataFileSize);
     di.file_no = (m_thread_id<<16) | data_no;
   }
@@ -349,7 +349,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     data_no++;
     close(data_fw.fd);
     sprintf(path, "%sdata/%d/%d", file_name_.c_str(), m_thread_id, data_no);
-    data_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
+    data_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK | O_NOATIME, 0644);
     posix_fallocate(data_fw.fd, 0, kMaxDataFileSize);
     di.file_offset = 0;
     di.file_no = (m_thread_id<<16) | data_no;
