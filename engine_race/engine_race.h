@@ -76,9 +76,6 @@ class HashTreeTable {
   // for speed up the lookup, need to sort it.
   // after some set operations->append to the
   // hash shard vector.
-  // Such as: bucket[i] has do push_back()
-  // then has_sort_[i] must be false;
-  // then can not use binary_search to find the item.
   void Sort();
 
   // print Hash Mean StdDev size of hash shard.
@@ -160,7 +157,6 @@ struct aio_env_single {
 
 
   RetCode Submit() {
-    write_over = false;
     if ((io_submit(ctx, kSingleRequest, &iocbs)) != kSingleRequest) {
       DEBUG << "io_submit meet error, " << std::endl;;
       return kIOError;
@@ -174,7 +170,6 @@ struct aio_env_single {
                         &events, &(timeout)) != kSingleRequest) {
       /**/
     }
-    write_over = true;
   }
 
   ~aio_env_single() {
@@ -187,213 +182,10 @@ struct aio_env_single {
 
   int fd = -1;
   char *buf = nullptr;
-  bool write_over = true;
   io_context_t ctx;
   struct iocb iocb;
   struct iocb* iocbs;
   struct io_event events;
-  struct timespec timeout;
-};
-
-struct aio_env_two {
-  static constexpr int two_event = 2;
-  aio_env_two() {
-    // prepare the io context.
-    memset(&ctx, 0, sizeof(ctx));
-    if (io_setup(two_event, &ctx) < 0) {
-      DEBUG << "Error in io_setup" << std::endl;
-    }
-
-    timeout.tv_sec = 0;
-    timeout.tv_nsec = 0;
-
-    memset(&iocb, 0, sizeof(iocb));
-    iocbs = (struct iocb**) malloc(sizeof(struct iocb*) * two_event);
-    for (int i = 0; i < two_event; i++) {
-      iocbs[i] = iocb + i;
-      //iocb[i].aio_lio_opcode = IO_CMD_PREAD;
-      iocb[i].aio_reqprio = 0;
-      // iocb[i].u.c.nbytes = kPageSize;
-      // iocb->u.c.offset = offset;
-      // iocb->aio_fildes = fd;
-      // iocb->u.c.buf = buf;
-    }
-
-    index_buf = GetAlignedBuffer(k1KB);  // 1KB for write index.
-    if (!index_buf) {
-      DEBUG << "aligned memory for aio_2 index failed\n";
-    }
-    data_buf = GetAlignedBuffer(kPageSize); // 4KB for write data.
-    if (!data_buf) {
-      DEBUG << "ailgned memory for aio_2 data failed\n";
-    }
-  }
-
-  void PrepareRead(int fd, uint64_t offset, char *out, uint32_t size, wait_item* item=nullptr) {
-    iocb[index].aio_fildes = fd;
-    iocb[index].u.c.offset = offset;
-    iocb[index].u.c.buf = out;
-    iocb[index].u.c.nbytes = size;
-    iocb[index].aio_lio_opcode = IO_CMD_PREAD;
-    iocb[index].data = item;
-    index++;
-  }
-
-  void PrepareWrite(int fd, uint64_t offset, char *out, uint32_t size, wait_item *item=nullptr) {
-    iocb[index].aio_fildes = fd;
-    iocb[index].u.c.offset = offset;
-    iocb[index].u.c.buf = out;
-    iocb[index].u.c.nbytes = size;
-    iocb[index].aio_lio_opcode = IO_CMD_PWRITE;
-    iocb[index].data = item;
-    index++;
-  }
-
-  void Clear() {
-    index = 0;
-  }
-
-  RetCode Submit() {
-    if ((io_submit(ctx, index, iocbs)) != index) {
-      DEBUG << "io_submit meet error, " << std::endl;;
-      printf("io_submit error\n");
-      return kIOError;
-    }
-    return kSucc;
-  }
-
-  void WaitOver() {
-    int write_over_cnt = 0;
-    while (write_over_cnt != index) {
-      int num_events = io_getevents(ctx, 1, index, events, &timeout);
-      write_over_cnt += num_events;
-    }
-  }
-
-  ~aio_env_two() {
-    io_destroy(ctx);
-    free(index_buf);
-    free(data_buf);
-  }
-
-  char *index_buf = nullptr;
-  char *data_buf = nullptr;
-  int index = 0;
-  io_context_t ctx;
-  struct iocb iocb[two_event];
-  struct iocb** iocbs = nullptr;
-  struct io_event events[two_event];
-  struct timespec timeout;
-};
-
-
-// it just set env for aio.
-// Usage:
-// struct aio_env io_;
-// io_.SetFD(fd);
-// io_.PrepareRead();
-// io_.PrepareRead();
-// io_.Submit();
-// io_.WaitOver();
-// io_.Clear();
-// this is just used in read read queue operations.
-struct aio_env {
-
-  void SetFD(int fd_) {
-    fd = fd_;
-  }
-
-  aio_env() {
-    // prepare the io context.
-    memset(&ctx, 0, sizeof(ctx));
-    if (io_setup(kMaxIOEvent, &ctx) < 0) {
-      DEBUG << "Error in io_setup" << std::endl;
-    }
-
-    timeout.tv_sec = 0;
-    timeout.tv_nsec = 0;
-
-    memset(&iocb, 0, sizeof(iocb));
-    iocbs = (struct iocb**) malloc(sizeof(struct iocb*) * kMaxIOEvent);
-    for (int i = 0; i < kMaxIOEvent; i++) {
-      iocbs[i] = iocb + i;
-      //iocb[i].aio_lio_opcode = IO_CMD_PREAD;
-      iocb[i].aio_reqprio = 0;
-      // iocb[i].u.c.nbytes = kPageSize;
-      // iocb->u.c.offset = offset;
-      // iocb->aio_fildes = fd;
-      // iocb->u.c.buf = buf;
-    }
-  }
-
-  void PrepareRead(uint64_t offset, char *out, uint32_t size, wait_item* item=nullptr) {
-    // align with 4 kb
-    assert ((((uint64_t)out) & 4095) == 0);
-    assert ((size & 1023) == 0);
-    // prepare the io
-    iocb[index].aio_fildes = fd;
-    iocb[index].u.c.offset = offset;
-    iocb[index].u.c.buf = out;
-    iocb[index].u.c.nbytes = size;
-    iocb[index].aio_lio_opcode = IO_CMD_PREAD;
-    iocb[index].data = item;
-    index++;
-  }
-
-  void PrepareWrite(uint64_t offset, char *out, uint32_t size, wait_item *item=nullptr) {
-    assert ((((uint64_t)out) & 4095) == 0);
-    assert ((size & 1023) == 0);
-
-    iocb[index].aio_fildes = fd;
-    iocb[index].u.c.offset = offset;
-    iocb[index].u.c.buf = out;
-    iocb[index].u.c.nbytes = size;
-    iocb[index].aio_lio_opcode = IO_CMD_PWRITE;
-    iocb[index].data = item;
-    index++;
-  }
-
-  void Clear() {
-    index = 0;
-  }
-
-  RetCode Submit() {
-    if ((io_submit(ctx, index, iocbs)) != index) {
-      DEBUG << "io_submit meet error, " << std::endl;;
-      printf("io_submit error\n");
-      return kIOError;
-    }
-    return kSucc;
-  }
-
-  void WaitOver() {
-    int write_over_cnt = 0;
-    while (write_over_cnt != index) {
-      constexpr int min_number = 1;
-      int num_events = io_getevents(ctx, min_number, index, events, &timeout);
-      assert (num_events >= 0);
-      for (int i = 0; i < num_events; i++) {
-        wait_item *feed_back = reinterpret_cast<wait_item*>(events[i].data);
-        if (feed_back) {
-          feed_back->feed_back();
-        }
-      }
-      // need to call for (i = 0; i < num_events; i++) events[i].call_back();
-      write_over_cnt += num_events;
-    }
-  }
-
-  ~aio_env() {
-    io_destroy(ctx);
-  }
-
-  int fd = 0;
-  int index = 0;
-  io_context_t ctx;
-  struct iocb iocb[kMaxIOEvent];
-  // struct iocb* iocbs[kMaxIOEvent];
-  struct iocb** iocbs = nullptr;
-  struct io_event events[kMaxIOEvent];
   struct timespec timeout;
 };
 
@@ -471,14 +263,6 @@ class EngineRace : public Engine  {
 
   // hash tree table.
   HashTreeTable hash_;
-
-  // data offset, started from 1GB. add the left 4KB in
-  // build hash tree table.!
-  uint64_t max_data_offset_ = kMaxIndexSize;
-  // index offset, start from 0 pos.
-  // add the left 16 bytes in
-  // build_hash_tree table.
-  uint64_t max_index_offset_ = 0;
 
   // use to pin cpu on core.
   uint64_t max_cpu_cnt_ = 0;

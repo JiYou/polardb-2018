@@ -168,13 +168,9 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   }
   // create index/data dir.
   std::string index_dir = engine_race->file_name_ + kMetaDirName;
-  if (mkdir(index_dir.c_str(), 0755)) {
-    DEBUG << "mkdir" << index_dir << "failed\n";
-  }
+  mkdir(index_dir.c_str(), 0755);
   std::string data_dir = engine_race->file_name_ + kDataDirName;
-  if (mkdir(data_dir.c_str(), 0755)) {
-    DEBUG << "mkdir" << data_dir << "failed\n";
-  }
+  mkdir(data_dir.c_str(), 0755);
 
   auto creat_lock_file = [&]() {
     if (0 != LockFile(name + "/" + kLockFile, &(engine_race->db_lock_))) {
