@@ -335,22 +335,22 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     idx_no++;
     sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
     index_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
-    posix_fallocate(index_fw.fd, 0, kMaxFileSize);
+    posix_fallocate(index_fw.fd, 0, kMaxIndexFileSize);
 
     data_no++;
     sprintf(path, "%sdata/%d/%d", file_name_.c_str(), m_thread_id, data_no);
     data_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
-    posix_fallocate(data_fw.fd, 0, kMaxFileSize);
+    posix_fallocate(data_fw.fd, 0, kMaxDataFileSize);
     di.file_no = (m_thread_id<<16) | data_no;
   }
 
 
-  if((di.file_offset + kPageSize) > kMaxFileSize) {
+  if((di.file_offset + kPageSize) > kMaxDataFileSize) {
     data_no++;
     close(data_fw.fd);
     sprintf(path, "%sdata/%d/%d", file_name_.c_str(), m_thread_id, data_no);
     data_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK, 0644);
-    posix_fallocate(data_fw.fd, 0, kMaxFileSize);
+    posix_fallocate(data_fw.fd, 0, kMaxDataFileSize);
     di.file_offset = 0;
     di.file_no = (m_thread_id<<16) | data_no;
   }

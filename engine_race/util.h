@@ -71,7 +71,8 @@ constexpr int kValueLengthBits = 12;  // stands for 4K
 constexpr size_t kMaxQueueSize = 128; // 4K * 4Kitem ~= 16MB
 constexpr int kMaxThreadNumber = 64; // max number of thread.
 constexpr int kMaxIOEvent = 64;
-constexpr uint64_t kMaxFileSize = 104857600ull;
+constexpr uint64_t kMaxDataFileSize = 209715200ull; // 200MB
+constexpr uint64_t kMaxIndexFileSize = 52428800ull; // 50MB
 
 // is key/value disk_item type.
 constexpr uint32_t kValidType = 1;

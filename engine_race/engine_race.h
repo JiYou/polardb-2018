@@ -149,13 +149,6 @@ struct aio_env_single {
     iocb.u.c.nbytes = k16MB;
   }
 
-  void Prepare100MB(uint64_t offset, char *out) {
-    iocb.u.c.offset = offset;
-    iocb.u.c.buf = out;
-    iocb.u.c.nbytes = kMaxFileSize;
-  }
-
-
   RetCode Submit() {
     if ((io_submit(ctx, kSingleRequest, &iocbs)) != kSingleRequest) {
       DEBUG << "io_submit meet error, " << std::endl;;
