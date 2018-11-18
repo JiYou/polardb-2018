@@ -25,23 +25,10 @@ using namespace polar_race;
 int main(void)
 {
   int fd, n;
-  fd = open("/tmp/dd", O_WRONLY|O_NONBLOCK|O_DIRECT, 0644);
-  if(fd<0) {
-    exit(1);
-  }
-
   char *buf = GetAlignedBuffer(16777216);
-/*
-  for (uint64_t i = 0; i < 16777216; i++) {
-    buf[i] = 'a';
-  }
-  write(fd, buf, 16777216);
-*/
-  close(fd);
-
-  memset(buf, 0, kPageSize);
-  fd = open("/tmp/dd", O_RDONLY|O_DIRECT|O_NONBLOCK, 0644);
-  while (read(fd, buf, kPageSize) < 0) {
+  memset(buf, 0, 16777216ull);
+  fd = open("/tmp/write.dat", O_RDONLY|O_DIRECT|O_NONBLOCK, 0644);
+  while (read(fd, buf, 16777216ull) < 0) {
     if (errno == EAGAIN) {
       for (int i = 0; i < 10; i ++) {
         printf("%c", buf[i]);
@@ -50,6 +37,9 @@ int main(void)
     } else {
       printf("read error\n");
     }
+  }
+  for (int i = 0; i < 10; i ++) {
+    printf("%c", buf[i]);
   }
   printf("read over\n");
   close(fd);
