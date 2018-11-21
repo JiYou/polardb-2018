@@ -59,7 +59,7 @@ constexpr int kSingleRequest = 1;
 constexpr int kMinNumber = 1;
 constexpr uint64_t kPageSize = 4096;
 constexpr uint64_t k256KB = kPageSize * 64; // 256KB
-constexpr uint64_t k1KB = kPageSize >> 2;
+constexpr uint64_t k1KB = 1024;
 constexpr uint64_t kReadValueCnt = 1024;
 constexpr uint64_t k4MB = kPageSize * 1024;
 constexpr uint64_t k16MB = k4MB * 4;
@@ -73,6 +73,8 @@ constexpr int kMaxThreadNumber = 64; // max number of thread.
 constexpr int kMaxIOEvent = 64;
 constexpr uint64_t kMaxDataFileSize = 16777216ull; // 16MB
 constexpr uint64_t kMaxIndexFileSize = 52428800ull; // 50MB
+constexpr uint64_t kMaxFileNumber = 65536;
+constexpr uint64_t kPathLength = 64; // path length
 
 // is key/value disk_item type.
 constexpr uint32_t kValidType = 1;
@@ -146,9 +148,29 @@ class FileLock  {
 int LockFile(const std::string& f, FileLock** l);
 int UnlockFile(FileLock* l);
 
-uint64_t toKey(const std::string &str);
-uint64_t toKey(const char *str);
-uint64_t toKey(const polar_race::PolarString &str);
+// change the string input to uint64_t
+// NOTE: this function is not simply change
+// the value to static_cast<uint64_t>
+// the changed value must keep the memcmp
+// order.
+// Such as:
+//  - abcdefg < abcdefgh
+// the convert result must also keep the
+// same order.
+uint64_t toInt(const char *s, uint64_t n);
+uint64_t toInt(const std::string &s);
+uint64_t toInt(const PolarString &ps);
+
+uint64_t toBack(uint64_t be);
+
+// head of the string, uin16_t
+// string = "abcdefgh"
+// hv = "ab"
+// little endian is "ba"
+uint16_t head(const char *s, uint64_t n);
+uint16_t head(const std::string &s);
+uint16_t head(const PolarString &ps);
+uint16_t head(const uint64_t key);
 
 }  // namespace polar_race
 

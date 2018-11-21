@@ -307,15 +307,13 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     }
   };
   static thread_local int m_thread_id = 0xffff;
-  static thread_local int idx_no = -1;
   static thread_local int data_no = 0;
-  static thread_local uint64_t idx_size = 0;
   static thread_local char path[64];
   static thread_local struct fd_wrapper index_fw;
   static thread_local struct fd_wrapper data_fw;
   static thread_local struct disk_index di;
 
-  di.key = *reinterpret_cast<const uint64_t*>(key.ToString().c_str());
+  di.key = toInt(key);
   if (m_thread_id == 0xffff) {
     auto thread_pid = pthread_self();
     cpu_set_t cpuset;
@@ -332,8 +330,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
 
     // TODO: this need to find out the last index of index file and data file.
     // in real project.
-    idx_no++;
-    sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, idx_no);
+    sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, 0/*index_id*/);
     index_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK | O_NOATIME , 0644);
     posix_fallocate(index_fw.fd, 0, kMaxIndexFileSize);
 
@@ -343,7 +340,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     posix_fallocate(data_fw.fd, 0, kMaxDataFileSize);
     di.file_no = (m_thread_id<<16) | data_no;
   }
-
 
   if((di.file_offset + kPageSize) > kMaxDataFileSize) {
     data_no++;
@@ -356,9 +352,12 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   }
 
   // begin to write the index.
-  write(index_fw.fd, &di, sizeof(struct disk_index));
-  idx_size += sizeof(struct disk_index);
-  write(data_fw.fd, value.ToString().c_str(), kPageSize);
+  if (write(index_fw.fd, &di, sizeof(struct disk_index)) != sizeof(struct disk_index)) {
+    return kIOError;
+  }
+  if (write(data_fw.fd, value.ToString().c_str(), kPageSize) != kPageSize) {
+    return kIOError;
+  }
   di.file_offset += kPageSize;
   return kSucc;
 }
@@ -394,7 +393,8 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   static thread_local struct aio_env_single read_aio(-1, true/*read*/, true/*buf*/);
   uint32_t file_no = 0;
   uint32_t file_offset = 0;
-  auto ret = hash_.GetNoLock(key.ToString().c_str(), &file_no, &file_offset);
+  uint64_t k64 = toInt(key);
+  auto ret = hash_.GetNoLock((char*)(&k64), &file_no, &file_offset);
   if (ret != kSucc) {
     return kNotFound;
   }

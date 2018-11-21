@@ -42,7 +42,7 @@ int main() {
       break;
     }
     cnt++;
-    printf("%llx %d-%d %d\n", di.key, di.file_no >> 16, di.file_no & 0xffff, di.file_offset);
+    printf("%lux %d-%d %d\n", di.key, di.file_no >> 16, di.file_no & 0xffff, di.file_offset);
   }
 
   std::cout << "read over: cnt = " << cnt << std::endl;

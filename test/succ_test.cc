@@ -118,7 +118,7 @@ int main(void) {
   polar_race::aio_env ev;
   char *buf = polar_race::GetAlignedBuffer(polar_race::kPageSize * 1024 * 4);
 
-  printf("addr = %lu\n", buf);
+  printf("addr = %lu\n", (long unsigned int)buf);
 
   for (int i = 0; i < 100; i ++) {
     buf[i] = 'c';

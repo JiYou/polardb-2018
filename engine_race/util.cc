@@ -9,6 +9,12 @@
 #include <sys/stat.h>
 #include <sys/file.h>
 
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <inttypes.h>
+#include <byteswap.h>
+
 #include <vector>
 #include <algorithm>
 #include <math.h>
@@ -160,19 +166,47 @@ char *GetAlignedBuffer(uint64_t bufer_size) {
   return buf;
 }
 
-uint64_t toKey(const std::string &str) {
-  return toKey(str.c_str());
+uint64_t toInt(const char *s, uint64_t n) {
+  uint64_t ret = 0;
+  // the string is 8 bytes.
+  if (n == kMaxKeyLen) {
+    ret = *reinterpret_cast<const uint64_t*>(s);
+    return bswap_64(ret);
+  }
+
+  char *b = (char*)(&ret);
+  for (uint32_t i = 0; i < n && i < kMaxKeyLen; i++) {
+    b[kMaxKeyLen-i-1] = s[i];
+  }
+  return ret;
 }
 
-uint64_t toKey(const char *str) {
-  const uint64_t *key = reinterpret_cast<const uint64_t*>(str);
-  return *key;
+uint64_t toBack(uint64_t be) {
+  return bswap_64(be);
 }
 
-uint64_t toKey(const polar_race::PolarString &str) {
-  return toKey(str.ToString().c_str());
+uint64_t toInt(const std::string &s) {
+  return toInt(s.c_str(), s.length());
 }
 
+uint64_t toInt(const PolarString &ps) {
+  return toInt(ps.ToString());
+}
 
+uint16_t head(const char *s, uint64_t n) {
+  return toInt(s, n) >> 48;
+}
+
+uint16_t head(const std::string &s) {
+  return head(s.c_str(), s.length());
+}
+
+uint16_t head(const PolarString &ps) {
+  return head(ps.ToString());
+}
+
+uint16_t head(const uint64_t key) {
+  return key >> 48;
+}
 
 }  // namespace polar_race
