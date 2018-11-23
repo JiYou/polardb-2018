@@ -163,7 +163,7 @@ Engine::~Engine() {
 
 
 RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
-  DEBUG << "commit id = 544e24864120d22427cfd228c251af9830d98a05 \n";
+  DEBUG << "commit id = 2790e095df8b8d71d828c70c8dcccea73c10ca4a \n";
   *eptr = NULL;
   EngineRace *engine_race = new EngineRace(name);
 
@@ -315,6 +315,7 @@ EngineRace::~EngineRace() {
   std::cout << "Total Time " << diff.count() / kNanoToMS << " (micro second)" << std::endl;
 
   DEBUG << "stage_ = " << stage_ << " ~EngineRace() close\n";
+  exit(0);
 }
 
 
@@ -484,7 +485,7 @@ void EngineRace::RangeEntry() {
 RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
     Visitor &visitor) {
 
-  DEBUG << "Range commit 544e24864120d22427cfd228c251af9830d98a05\n";
+  DEBUG << "Range commit 2790e095df8b8d71d828c70c8dcccea73c10ca4a\n";
 
   // lasy init of hash table.
   // init the read map.
