@@ -163,7 +163,6 @@ Engine::~Engine() {
 
 
 RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
-  DEBUG << "commit id = 2790e095df8b8d71d828c70c8dcccea73c10ca4a \n";
   *eptr = NULL;
   EngineRace *engine_race = new EngineRace(name);
 
@@ -313,9 +312,6 @@ EngineRace::~EngineRace() {
   end_ = std::chrono::system_clock::now();
   auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ - begin_);
   std::cout << "Total Time " << diff.count() / kNanoToMS << " (micro second)" << std::endl;
-
-  DEBUG << "stage_ = " << stage_ << " ~EngineRace() close\n";
-  exit(0);
 }
 
 
@@ -455,6 +451,11 @@ void EngineRace::RangeEntry() {
     q_.Pop(&vs);
 
     DEBUG << "get vs size = " << vs.size() << std::endl;
+    auto &all = hash_.GetAll();
+    for (auto &v: vs) {
+      DEBUG << "range: " << (v->start == all.begin())
+            << " , " << (v->end == all.end()) << std::endl;
+    }
     // get vs size.
     // TODO: assume all the range are in the same range.
     // this is just for the assumption.
@@ -495,8 +496,6 @@ void EngineRace::RangeEntry() {
 RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
     Visitor &visitor) {
 
-  DEBUG << "Range commit 2790e095df8b8d71d828c70c8dcccea73c10ca4a\n";
-
   // lasy init of hash table.
   // init the read map.
   static std::once_flag init_range;
@@ -514,6 +513,7 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
     }
     auto &all = hash_.GetAll();
     std::sort(all.begin(), all.end());
+    DEBUG << "all.size = " << all.size() << std::endl;
     END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
   });
 
@@ -532,7 +532,6 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
 
   auto &all = hash_.GetAll();
 
-  DEBUG << "all.size = " << all.size() << std::endl;
   auto start_pos = all.begin();
   // if not the start of begin
   // use binary search find the position.
@@ -554,7 +553,6 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
     );
   }
 
-  DEBUG << "start = " << include_start << " , " << include_last << std::endl;
 
   visitor_item vi(start_pos, end_pos, &visitor);
   q_.Push(&vi);
