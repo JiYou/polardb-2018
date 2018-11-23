@@ -75,7 +75,7 @@ constexpr uint64_t kMaxDataFileSize = 16777216ull; // 16MB
 constexpr uint64_t kMaxIndexFileSize = 52428800ull; // 50MB
 constexpr uint64_t kMaxFileNumber = 65536;
 constexpr uint64_t kPathLength = 64; // path length
-constexpr uint64_t kMaxKVItem = 67108864ull; // 64M
+constexpr uint64_t kMaxKVItem = 64000000; // 64M
 
 // is key/value disk_item type.
 constexpr uint32_t kValidType = 1;

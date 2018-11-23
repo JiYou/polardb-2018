@@ -163,6 +163,7 @@ void HashTreeTable::Save(const char *file_name) {
     }
   }
   close(fd);
+  DEBUG << "save all index to " << file_name << std::endl;
 }
 
 bool HashTreeTable::Load(const char *file_name) {
@@ -175,8 +176,9 @@ bool HashTreeTable::Load(const char *file_name) {
   hash_.clear();
   all_.resize(kMaxKVItem);
   const int read_size = kMaxKVItem * sizeof(struct disk_index);
-  if (read(fd, all_.data(), read_size) != read_size) {
-    DEBUG << "[WARN] read file " << file_name << " failed\n";
+  int ret = read(fd, all_.data(), read_size);
+  if (ret != read_size) {
+    DEBUG << "[WARN] read file size = " << ret << " , " << file_name << " failed\n";
   }
   close(fd);
   return true;
