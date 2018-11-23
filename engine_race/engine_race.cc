@@ -156,6 +156,7 @@ Engine::~Engine() {
 
 
 RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
+  DEBUG << "commit id = 2da6ec04381bb3b0cd3f87f43b3c12c2e1813c72 \n";
   *eptr = NULL;
   EngineRace *engine_race = new EngineRace(name);
 
@@ -479,6 +480,7 @@ void EngineRace::RangeEntry() {
 RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
     Visitor &visitor) {
 
+  DEBUG << "Range commit 2da6ec04381bb3b0cd3f87f43b3c12c2e1813c72\n";
 
   // lasy init of hash table.
   // init the read map.
