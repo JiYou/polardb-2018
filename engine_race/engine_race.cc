@@ -484,6 +484,15 @@ void EngineRace::RangeEntry() {
   });
   thd_exit.detach();
 
+  struct kv_item {
+    uint64_t key;
+    char *buf;
+  };
+
+//  Queue<kv_item> buffer_q(kPageSize); // 4K * 4K ~= 16MB
+//  buffer_q.SetNoWait();
+
+
   while (!stop_) {
     q_.Pop(&vs);
 
