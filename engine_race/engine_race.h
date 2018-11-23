@@ -240,7 +240,7 @@ class Queue {
     void Pop(std::vector<KVItem*> *vs, bool is_write=true) {
         if (is_write) {
           for (int i = 0; i < 1024 && Size() < kMaxThreadNumber; i++) {
-            std::this_thread::sleep_for(std::chrono::nanoseconds(1));
+            std::this_thread::sleep_for(std::chrono::nanoseconds(1000));
           }
         }
         std::unique_lock<std::mutex> lck(qlock_);
