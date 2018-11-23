@@ -115,6 +115,18 @@ struct read_item : public wait_item {
   read_item(uint64_t p, char *b): pos(p), buf(b) { }
 };
 
+struct disk_index;
+struct visitor_item : public wait_item {
+  std::vector<struct disk_index>::iterator start;
+  std::vector<struct disk_index>::iterator end;
+  Visitor *vs = nullptr;
+  visitor_item(
+    std::vector<struct disk_index>::iterator s,
+    std::vector<struct disk_index>::iterator e,
+    Visitor *vis
+  ): start(s), end(e), vs(vis) { }
+};
+
 void ComputeMeanSteDev(const std::vector<size_t> &vs, double *mean, double *std);
 
 // Hash

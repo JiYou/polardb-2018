@@ -431,6 +431,51 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   return kSucc;
 }
 
+void EngineRace::RangeEntry() {
+  struct aio_env_single read_aio(-1, true/*read*/, true/*buf*/);
+  std::vector<visitor_item*> vs;
+
+  DEBUG << "start range entry\n";
+
+  while (!stop_) {
+    q_.Pop(&vs);
+
+    // get vs size.
+    // TODO: assume all the range are in the same range.
+    // this is just for the assumption.
+    auto start_pos = vs[0]->start;
+    auto end_pos = vs[0]->end;
+    for (auto iter = start_pos; iter != end_pos; iter++) {
+      uint32_t file_no = iter->file_no;
+      uint32_t file_offset = iter->file_offset;
+      uint64_t k64 = iter->key;
+
+      // then begin to get the data dir.
+      int data_dir = file_no >> 16;
+      int sub_file_no = file_no & 0xffff;
+      // begin to find the key & pos
+      // TODO use non-block read to count the bytes read then copy to value.
+      read_aio.SetFD(data_fds_[data_dir][sub_file_no]);
+      read_aio.Prepare(file_offset);
+      read_aio.Submit();
+      read_aio.WaitOver();
+
+      k64 = toBack(k64);
+      PolarString k((char*)(&k64), kMaxKeyLen);
+      PolarString v(read_aio.buf, kPageSize);
+
+      for (auto &x: vs) {
+        x->vs->Visit(k, v);
+      }
+    }
+
+    for (auto &v: vs) {
+      v->feed_back();
+    }
+    vs.clear();
+  }
+}
+
 RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
     Visitor &visitor) {
   return kSucc;

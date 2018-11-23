@@ -213,6 +213,11 @@ class Queue {
       consume_.notify_all();
     }
 
+    uint64_t Size() {
+      std::unique_lock<std::mutex> lck(qlock_);
+      return q_.size();
+    }
+
     /*
      * because the read is random, wait maybe not that effective.
      * but for write, if more data flushed by one time.
@@ -220,6 +225,11 @@ class Queue {
      * So, if find the items are smaller, wait for some nano seconds.
      */
     void Pop(std::vector<KVItem*> *vs, bool is_write=true) {
+        if (is_write) {
+          for (int i = 0; i < 1024 && Size() < kMaxThreadNumber; i++) {
+            std::this_thread::sleep_for(std::chrono::nanoseconds(1));
+          }
+        }
         std::unique_lock<std::mutex> lck(qlock_);
         consume_.wait(lck, [&] {return !q_.empty(); });
         vs->swap(q_);
@@ -239,8 +249,7 @@ class EngineRace : public Engine  {
   static RetCode Open(const std::string& name, Engine** eptr);
 
   explicit EngineRace(const std::string& dir)
-    : dir_(dir),
-    db_lock_(nullptr) {
+    : dir_(dir), q_(kMaxThreadNumber * 2) {
   }
 
   virtual ~EngineRace();
@@ -256,6 +265,7 @@ class EngineRace : public Engine  {
       Visitor &visitor) override;
 
  private:
+  void RangeEntry();
   void BuildHashTable(bool is_hash);
   std::string file_name_;
   // every writer just write content into
@@ -265,7 +275,7 @@ class EngineRace : public Engine  {
 
  private:
   std::string dir_;
-  FileLock* db_lock_;
+  FileLock* db_lock_ = nullptr;
 
   // hash tree table.
   HashTreeTable hash_;
@@ -278,6 +288,11 @@ class EngineRace : public Engine  {
 
   // open all the data files.
   std::vector<std::vector<int>> data_fds_;
+
+  std::atomic<bool> stop_{false};
+
+  // queue for the range scan
+  Queue<visitor_item> q_;
 
   // time counter
   decltype(std::chrono::system_clock::now()) begin_;
