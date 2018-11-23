@@ -146,6 +146,42 @@ bool HashTreeTable::CopyToAll() {
   return false;
 }
 
+void HashTreeTable::Save(const char *file_name) {
+  int fd = open(file_name, O_WRONLY | O_CREAT | O_TRUNC | O_NONBLOCK | O_NOATIME, 0644);
+  if (fd < 0 ) {
+    DEBUG << "open " << file_name << "failed\n";
+    return;
+  }
+
+  // begin to write all the index into single file.
+  for (auto &vs: hash_) {
+    if (!vs.empty()) {
+      const int write_size = vs.size() * sizeof(struct disk_index);
+      if (write(fd, vs.data(), write_size) != write_size) {
+        DEBUG << "write vector to " << file_name << " failed\n";
+      }
+    }
+  }
+  close(fd);
+}
+
+bool HashTreeTable::Load(const char *file_name) {
+  int fd = open(file_name, O_RDONLY | O_NOATIME, 0644);
+  if (fd < 0) {
+    DEBUG << "open " << file_name << " failed\n";
+    return false;
+  }
+
+  hash_.clear();
+  all_.resize(kMaxKVItem);
+  const int read_size = kMaxKVItem * sizeof(struct disk_index);
+  if (read(fd, all_.data(), read_size) != read_size) {
+    DEBUG << "[WARN] read file " << file_name << " failed\n";
+  }
+  close(fd);
+  return true;
+}
+
 //--------------------------------------------------------
 // Engine
 //--------------------------------------------------------
@@ -170,6 +206,7 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 
   std::atomic<bool> meet_error{false};
   engine_race->file_name_ = name + "/";
+  engine_race->all_index_file_ = name + "/ALL";
   // create the dir.
   if (!FileExists(name)) {
     if (mkdir(name.c_str(), 0755)) {
@@ -205,49 +242,46 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 
 void EngineRace::BuildHashTable(bool is_hash) {
   hash_.Init(is_hash);
-  spinlock *shard_locks = nullptr;
-  if (is_hash) {
-    shard_locks = new spinlock[kMaxBucketSize];
-  } else {
-    shard_locks = new spinlock;
-  }
-
-  std::vector<std::string> idx_dirs(kMaxThreadNumber);
-  idx_dirs.clear();
-  std::string full_idx_dir = file_name_ + kMetaDirName;
-  if (0 != GetDirFiles(full_idx_dir, &idx_dirs)) {
-    DEBUG << "call GetDirFiles() failed: " << full_idx_dir << std::endl;
-  }
-
-  auto insert_item = [&](const struct disk_index &di) {
-    if (is_hash) {
-      const char *k = reinterpret_cast<const char*>(&(di.key));
-      hash_.SetNoLock(k, di.file_no, di.file_offset, shard_locks);
-    } else {
-      shard_locks->lock();
-      hash_.GetAll().emplace_back(di);
-      shard_locks->unlock();
-    }
-  };
-
-  auto init_hash_per_thread = [&](const std::string &fn) {
-    // open the folder.
-    auto file_name = full_idx_dir + "/" + fn + "/0";
-    auto fd = open(file_name.c_str(), O_RDONLY | O_NOATIME, 0644);
-    struct disk_index di;
-    while (read(fd, &di, sizeof(disk_index)) == sizeof(struct disk_index)) {
-      if (di.key == 0 && di.file_no == 0 && di.file_offset == 0) {
-        break;
-      }
-      insert_item(di);
-    }
-    close(fd);
-  };
 
   std::vector<std::thread> thread_list(kMaxThreadNumber << 1);
   thread_list.clear();
-  for (auto &idx_dir: idx_dirs) {
-    thread_list.emplace_back(std::thread(init_hash_per_thread, idx_dir));
+
+  spinlock *shard_locks = is_hash ?  new spinlock[kMaxBucketSize] : nullptr;
+  std::vector<std::string> idx_dirs(kMaxThreadNumber);
+  std::string full_idx_dir = file_name_ + kMetaDirName;
+
+  if (is_hash) {
+    DEBUG << "begin to build the hash index.\n";
+
+    idx_dirs.clear();
+    if (0 != GetDirFiles(full_idx_dir, &idx_dirs)) {
+      DEBUG << "call GetDirFiles() failed: " << full_idx_dir << std::endl;
+    }
+
+    auto init_hash_per_thread = [&](const std::string &fn) {
+      // open the folder.
+      auto file_name = full_idx_dir + "/" + fn + "/0";
+      auto fd = open(file_name.c_str(), O_RDONLY | O_NOATIME, 0644);
+      if (fd < 0) {
+        DEBUG << "open " << file_name << "failed\n";
+      }
+      struct disk_index di;
+      while (read(fd, &di, sizeof(disk_index)) == sizeof(struct disk_index)) {
+        if (di.key == 0 && di.file_no == 0 && di.file_offset == 0) {
+          break;
+        }
+        const char *k = reinterpret_cast<const char*>(&(di.key));
+        assert(shard_locks);
+        hash_.SetNoLock(k, di.file_no, di.file_offset, shard_locks);
+      }
+      close(fd);
+    };
+
+    for (auto &idx_dir: idx_dirs) {
+      thread_list.emplace_back(std::thread(init_hash_per_thread, idx_dir));
+    }
+  } else {
+    hash_.Load(AllIndexFile());
   }
 
   // then open all the data_fds_;
@@ -289,10 +323,8 @@ void EngineRace::BuildHashTable(bool is_hash) {
     v.join();
   }
 
-  if (is_hash) {
+  if (is_hash && shard_locks) {
     delete [] shard_locks;
-  } else {
-    delete shard_locks;
   }
 }
 
@@ -307,6 +339,11 @@ EngineRace::~EngineRace() {
         close(x);
       }
     }
+  }
+
+  if (stage_ == kReadStage) {
+    // save all the kv into single file.
+    hash_.Save(AllIndexFile());
   }
 
   end_ = std::chrono::system_clock::now();
@@ -504,22 +541,25 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
       q_.SetNoWait();
     }
 
-    stage_ = kRangeStage; // 2 for range scan.
-
-    DEBUG << "start the thread for range\n";
-    std::thread write_thread(&EngineRace::RangeEntry, this);
-    write_thread.detach();
-
     BEGIN_POINT(begin_build_hash_table);
     if (!hash_.CopyToAll()) {
       // if copy failed, then need to read from disk.
       // TODO: need to deal with the duplicated keys in 64Mkv
       BuildHashTable(false/*read all index into single vector*/);
     }
+    END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
+
+    BEGIN_POINT(begin_sort_hash_table);
     auto &all = hash_.GetAll();
     std::sort(all.begin(), all.end());
     DEBUG << "all.size = " << all.size() << std::endl;
-    END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
+    END_POINT(end_sort_hash_table, begin_sort_hash_table, "build_sort_time");
+
+
+    stage_ = kRangeStage; // 2 for range scan.
+    DEBUG << "start the thread for range\n";
+    std::thread write_thread(&EngineRace::RangeEntry, this);
+    write_thread.detach();
   });
 
   // after sort, then begin to read the content.

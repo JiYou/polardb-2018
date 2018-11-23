@@ -93,6 +93,10 @@ class HashTreeTable {
   // in a single vector.
   std::vector<struct disk_index> &GetAll() { return all_; }
 
+  // save all the index files into single file.
+  void Save(const char *file_name);
+  bool Load(const char *file_name);
+
   // copy to all vector.
   // return: true have copy
   //         false, not copy.
@@ -104,7 +108,6 @@ class HashTreeTable {
       hash_.resize(kMaxBucketSize);
     } else {
       std::vector<std::vector<struct disk_index>>().swap(hash_);
-      all_.resize(67108864ull);
       all_.clear();
     }
     is_hash_ = is_hash;
@@ -287,6 +290,8 @@ class EngineRace : public Engine  {
  private:
   void RangeEntry();
   void BuildHashTable(bool is_hash);
+  const char *AllIndexFile() { return all_index_file_.c_str(); }
+  std::string all_index_file_;
   std::string file_name_;
 
  private:
