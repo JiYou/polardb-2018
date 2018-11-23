@@ -478,23 +478,26 @@ void EngineRace::RangeEntry() {
 
   DEBUG << "start range entry\n";
 
-/*
   int cnt = 0;
-  std::thread thd_exit([&] {
-    std::this_thread::sleep_for(std::chrono::seconds(300));
-    DEBUG << "range read cnt = " << cnt << std::endl;
-    exit(-1);
-  });
-  thd_exit.detach();
-*/
+
   struct kv_item {
     uint64_t key;
     char *buf;
   };
 
-//  Queue<kv_item> buffer_q(kPageSize); // 4K * 4K ~= 16MB
-//  buffer_q.SetNoWait();
+  Queue<kv_item> buffer_q(kPageSize); // 4K * 4K ~= 16MB
+  buffer_q.SetNoWait();
 
+  struct buf_mgr {
+    char *buf = nullptr;
+    std::vector<char*> free_list;
+    buf_mgr() {
+      buf = GetAlignedBuffer(k16MB);
+    }
+    ~buf_mgr() {
+      free(buf);
+    }
+  };
 
   while (!stop_) {
     q_.Pop(&vs);
@@ -510,6 +513,30 @@ void EngineRace::RangeEntry() {
     // this is just for the assumption.
     auto start_pos = vs[0]->start;
     auto end_pos = vs[0]->end;
+
+    // when pick up, then generate new thread.
+/*
+    std::thread thd_disk_read([&] {
+      for (auto iter = start_pos; iter != end_pos; iter++) {
+        cnt ++;
+        uint32_t file_no = iter->file_no;
+        uint32_t file_offset = iter->file_offset;
+        uint64_t k64 = iter->key;
+
+        // then begin to get the data dir.
+        int data_dir = file_no >> 16;
+        int sub_file_no = file_no & 0xffff;
+        // begin to find the key & pos
+        // TODO use non-block read to count the bytes read then copy to value.
+        read_aio.SetFD(data_fds_[data_dir][sub_file_no]);
+        read_aio.Prepare(file_offset);
+        read_aio.Submit();
+        read_aio.WaitOver();
+
+      }
+    });
+*/
+
     for (auto iter = start_pos; iter != end_pos; iter++) {
       cnt ++;
       uint32_t file_no = iter->file_no;
@@ -539,6 +566,7 @@ void EngineRace::RangeEntry() {
       v->feed_back();
     }
     vs.clear();
+//    thd_disk_read.join();
   }
 }
 
@@ -609,7 +637,6 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
       }
     );
   }
-
 
   visitor_item vi(start_pos, end_pos, &visitor);
   q_.Push(&vi);

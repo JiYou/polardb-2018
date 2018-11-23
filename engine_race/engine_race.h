@@ -220,7 +220,7 @@ class Queue {
     // the address of write_item maybe local variable
     // in the stack, so the caller must wait before
     // it return from stack-function.
-    void Push(KVItem *w) {
+    void Push(KVItem w) {
       // check the queue is full or not.
       std::unique_lock<std::mutex> l(qlock_);
       // check full or not.
@@ -240,7 +240,7 @@ class Queue {
      * it maybe faster that flush 2 times.
      * So, if find the items are smaller, wait for some nano seconds.
      */
-    void Pop(std::vector<KVItem*> *vs, bool is_write=true) {
+    void Pop(std::vector<KVItem> *vs, bool is_write=true) {
         if (is_write && !has_wait) {
           for (int i = 0; i < 1024 && Size() < kMaxThreadNumber; i++) {
             DEBUG << "i = " << i << "Q size = " << Size() << std::endl;
@@ -260,7 +260,7 @@ class Queue {
   }
   private:
     bool has_wait = false;
-    std::vector<KVItem*> q_;
+    std::vector<KVItem> q_;
     std::mutex qlock_;
     std::condition_variable produce_;
     std::condition_variable consume_;
@@ -319,7 +319,7 @@ class EngineRace : public Engine  {
   std::atomic<bool> stop_{false};
 
   // queue for the range scan
-  Queue<visitor_item> q_;
+  Queue<visitor_item*> q_;
 
   // time counter
   decltype(std::chrono::system_clock::now()) begin_;
