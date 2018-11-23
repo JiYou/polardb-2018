@@ -443,15 +443,25 @@ void EngineRace::RangeEntry() {
 
   DEBUG << "start range entry\n";
 
+  int cnt = 0;
+  std::thread thd_exit([&] {
+    std::this_thread::sleep_for(std::chrono::seconds(300));
+    DEBUG << "range read cnt = " << cnt << std::endl;
+    exit(-1);
+  });
+  thd_exit.detach();
+
   while (!stop_) {
     q_.Pop(&vs);
 
+    DEBUG << "get vs size = " << vs.size() << std::endl;
     // get vs size.
     // TODO: assume all the range are in the same range.
     // this is just for the assumption.
     auto start_pos = vs[0]->start;
     auto end_pos = vs[0]->end;
     for (auto iter = start_pos; iter != end_pos; iter++) {
+      cnt ++;
       uint32_t file_no = iter->file_no;
       uint32_t file_offset = iter->file_offset;
       uint64_t k64 = iter->key;
