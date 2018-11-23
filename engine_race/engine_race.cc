@@ -478,6 +478,7 @@ void EngineRace::RangeEntry() {
 
   DEBUG << "start range entry\n";
 
+/*
   int cnt = 0;
   std::thread thd_exit([&] {
     std::this_thread::sleep_for(std::chrono::seconds(300));
@@ -485,7 +486,7 @@ void EngineRace::RangeEntry() {
     exit(-1);
   });
   thd_exit.detach();
-
+*/
   struct kv_item {
     uint64_t key;
     char *buf;
