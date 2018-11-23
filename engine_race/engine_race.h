@@ -81,9 +81,20 @@ class HashTreeTable {
   // print Hash Mean StdDev size of hash shard.
   void PrintMeanStdDev();
 
+  // for range scan, return all the items
+  // in a single vector.
+  std::vector<struct disk_index> &GetAll() { return all_; }
+
  public:
-  void Init() {
-    hash_.resize(kMaxBucketSize);
+  void Init(bool is_hash) {
+    if (is_hash) {
+      hash_.resize(kMaxBucketSize);
+    } else {
+      std::vector<std::vector<struct disk_index>>().swap(hash_);
+      all_.resize(67108864ull);
+      all_.clear();
+    }
+    is_hash_ = is_hash;
   }
 
   HashTreeTable() { }
@@ -95,6 +106,8 @@ class HashTreeTable {
   HashTreeTable &operator=(const HashTreeTable&) = delete;
   HashTreeTable &operator=(const HashTreeTable&&) = delete;
  private:
+  bool is_hash_ = true;
+  std::vector<struct disk_index> all_;
   std::vector<std::vector<struct disk_index>> hash_;
  private:
   uint32_t compute_pos(uint64_t key);
@@ -243,7 +256,7 @@ class EngineRace : public Engine  {
       Visitor &visitor) override;
 
  private:
-  void BuildHashTable();
+  void BuildHashTable(bool is_hash);
   std::string file_name_;
   // every writer just write content into
   // the thread id related dir.

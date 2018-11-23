@@ -100,6 +100,10 @@ RetCode HashTreeTable::SetNoLock(const char *key, uint32_t file_no, uint32_t fil
 }
 
 void HashTreeTable::Sort() {
+  if (!is_hash_) {
+    std::sort(all_.begin(), all_.end());
+    return;
+  }
   // there are 64 thread.
   // split all the range to 64 threads.
   // every thread would contains 104354.
@@ -192,9 +196,14 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   return kSucc;
 }
 
-void EngineRace::BuildHashTable() {
-  hash_.Init();
-  spinlock *shard_locks = new spinlock[kMaxBucketSize];
+void EngineRace::BuildHashTable(bool is_hash) {
+  hash_.Init(is_hash);
+  spinlock *shard_locks = nullptr;
+  if (is_hash) {
+    shard_locks = new spinlock[kMaxBucketSize];
+  } else {
+    shard_locks = new spinlock;
+  }
 
   std::vector<std::string> idx_dirs(kMaxThreadNumber);
   idx_dirs.clear();
@@ -204,8 +213,14 @@ void EngineRace::BuildHashTable() {
   }
 
   auto insert_item = [&](const struct disk_index &di) {
-    const char *k = reinterpret_cast<const char*>(&(di.key));
-    hash_.SetNoLock(k, di.file_no, di.file_offset, shard_locks);
+    if (is_hash) {
+      const char *k = reinterpret_cast<const char*>(&(di.key));
+      hash_.SetNoLock(k, di.file_no, di.file_offset, shard_locks);
+    } else {
+      shard_locks->lock();
+      hash_.GetAll().emplace_back(di);
+      shard_locks->unlock();
+    }
   };
 
   auto init_hash_per_thread = [&](const std::string &fn) {
@@ -373,7 +388,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   static std::once_flag init_mptr;
   std::call_once (init_mptr, [this] {
     BEGIN_POINT(begin_build_hash_table);
-    BuildHashTable();
+    BuildHashTable(true);
     END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
 
     BEGIN_POINT(begin_sort_hash_table);
