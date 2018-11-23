@@ -229,38 +229,40 @@ void EngineRace::BuildHashTable() {
   }
 
   // then open all the data_fds_;
-  std::vector<std::string> data_dirs(kMaxThreadNumber);
-  data_dirs.clear();
-  std::string full_data_dir = file_name_ + kDataDirName;
-  if (0 != GetDirFiles(full_data_dir, &data_dirs)) {
-    DEBUG << "call GetDirFiles() failed: " << full_data_dir << std::endl;
-  }
-  data_fds_.resize(data_dirs.size() + 1);
-
-  auto deal_single_data_dir = [&](const std::string &dn) {
-    std::vector<std::string> files(kMaxThreadNumber);
-    files.clear();
-    std::string sub_dir_name = full_data_dir + "/" + dn;
-    if (0 != GetDirFiles(sub_dir_name, &files)) {
-      DEBUG << "call GetDirFiles() failed: " << sub_dir_name << std::endl;
+  if (data_fds_.empty()) {
+    std::vector<std::string> data_dirs(kMaxThreadNumber);
+    data_dirs.clear();
+    std::string full_data_dir = file_name_ + kDataDirName;
+    if (0 != GetDirFiles(full_data_dir, &data_dirs)) {
+      DEBUG << "call GetDirFiles() failed: " << full_data_dir << std::endl;
     }
-    int x = atoi(dn.c_str());
-    data_fds_[x].resize(files.size()+1);
-    for (auto &f: files) {
-      auto file_name = sub_dir_name + "/" + f;
-      auto fd = open(file_name.c_str(), O_RDONLY|O_DIRECT | O_NOATIME, 0644);
-      if (fd < 0) {
-        DEBUG << "can not open file " << file_name << std::endl;
-        return;
+    data_fds_.resize(data_dirs.size() + 1);
+
+    auto deal_single_data_dir = [&](const std::string &dn) {
+      std::vector<std::string> files(kMaxThreadNumber);
+      files.clear();
+      std::string full_data_dir = file_name_ + kDataDirName;
+      std::string sub_dir_name = full_data_dir + "/" + dn;
+      if (0 != GetDirFiles(sub_dir_name, &files)) {
+        DEBUG << "call GetDirFiles() failed: " << sub_dir_name << std::endl;
       }
-      data_fds_[x][atoi(f.c_str())] = fd;
+      int x = atoi(dn.c_str());
+      data_fds_[x].resize(files.size()+1);
+      for (auto &f: files) {
+        auto file_name = sub_dir_name + "/" + f;
+        auto fd = open(file_name.c_str(), O_RDONLY|O_DIRECT | O_NOATIME, 0644);
+        if (fd < 0) {
+          DEBUG << "can not open file " << file_name << std::endl;
+          return;
+        }
+        data_fds_[x][atoi(f.c_str())] = fd;
+      }
+    };
+
+    for (auto &d: data_dirs) {
+      thread_list.emplace_back(std::thread(deal_single_data_dir, d));
     }
-  };
-
-  for (auto &d: data_dirs) {
-    thread_list.emplace_back(std::thread(deal_single_data_dir, d));
   }
-
   for (auto &v: thread_list) {
     v.join();
   }
@@ -275,7 +277,9 @@ EngineRace::~EngineRace() {
 
   for (auto &v: data_fds_) {
     for (auto &x: v) {
-      close(x);
+      if (x > 0) {
+        close(x);
+      }
     }
   }
 
