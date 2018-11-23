@@ -478,8 +478,64 @@ void EngineRace::RangeEntry() {
 
 RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
     Visitor &visitor) {
+
+
+  // lasy init of hash table.
+  // init the read map.
+  static std::once_flag init_range;
+  std::call_once (init_range, [this] {
+    DEBUG << "start the thread for range\n";
+    std::thread write_thread(&EngineRace::RangeEntry, this);
+    write_thread.detach();
+
+    BEGIN_POINT(begin_build_hash_table);
+    BuildHashTable(false/*read all index into single vector*/);
+    hash_.Sort();
+    END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
+  });
+
+  // after sort, then begin to read the content.
+  uint64_t start = toInt(lower);
+  uint64_t end = toInt(upper);
+
+  bool include_start = false;
+  if (lower.empty()) {
+    include_start = true;
+  }
+  bool include_last = false;
+  if (upper.empty()) {
+    include_last = true;
+  }
+
+  auto &all = hash_.GetAll();
+  auto start_pos = all.begin();
+  // if not the start of begin
+  // use binary search find the position.
+  if (!include_start) {
+    // need to use binary search find the start position.
+    start_pos = std::lower_bound(all.begin(), all.end(), start,
+      [](const struct disk_index &d, const uint64_t v) -> bool {
+        return d.key < v;
+      }
+    );
+  }
+
+  auto end_pos = all.end();
+  if (!include_last) {
+    end_pos = std::lower_bound(start_pos, all.end(), end,
+      [](const disk_index &d, const uint64_t v) -> bool {
+        return d.key < v;
+      }
+    );
+  }
+
+  DEBUG << "start = " << include_start << " , " << include_last << std::endl;
+
+  visitor_item vi(start_pos, end_pos, &visitor);
+  q_.Push(&vi);
+  std::unique_lock<std::mutex> l(vi.lock_);
+  vi.cond_.wait(l, [&vi] { return vi.is_done; });
   return kSucc;
 }
-
 }  // namespace polar_race
 
