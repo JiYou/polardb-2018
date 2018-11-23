@@ -79,6 +79,11 @@ constexpr uint64_t kPathLength = 64; // path length
 // is key/value disk_item type.
 constexpr uint32_t kValidType = 1;
 
+constexpr int kInitStage = -1;
+constexpr int kWriteStage = 0;
+constexpr int kReadStage = 1;
+constexpr int kRangeStage = 2;
+
 // use a maxium skip type to jump out the invalid item.
 constexpr uint64_t kIndexSkipType{18446744073709551615ull};
 

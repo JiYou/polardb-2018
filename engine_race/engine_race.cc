@@ -100,10 +100,6 @@ RetCode HashTreeTable::SetNoLock(const char *key, uint32_t file_no, uint32_t fil
 }
 
 void HashTreeTable::Sort() {
-  if (!is_hash_) {
-    std::sort(all_.begin(), all_.end());
-    return;
-  }
   // there are 64 thread.
   // split all the range to 64 threads.
   // every thread would contains 104354.
@@ -135,7 +131,19 @@ void HashTreeTable::PrintMeanStdDev() {
   double mean = 0, stdev = 0;
   ComputeMeanSteDev(vs, &mean, &stdev);
   DEBUG << "HashHard Stat: mean = " << mean
-            << " , " << "stdev = " << stdev << std::endl;
+        << " , " << "stdev = " << stdev << std::endl;
+}
+
+bool HashTreeTable::CopyToAll() {
+  if (!hash_.empty()) {
+    for (auto &vs: hash_) {
+      for (auto &x: vs) {
+        all_.push_back(x);
+      }
+    }
+    return true;
+  }
+  return false;
 }
 
 //--------------------------------------------------------
@@ -145,7 +153,6 @@ void HashTreeTable::PrintMeanStdDev() {
 RetCode Engine::Open(const std::string& name, Engine** eptr) {
   return EngineRace::Open(name, eptr);
 }
-
 
 Engine::~Engine() {
 }
@@ -283,7 +290,11 @@ void EngineRace::BuildHashTable(bool is_hash) {
     v.join();
   }
 
-  delete [] shard_locks;
+  if (is_hash) {
+    delete [] shard_locks;
+  } else {
+    delete shard_locks;
+  }
 }
 
 EngineRace::~EngineRace() {
@@ -298,6 +309,8 @@ EngineRace::~EngineRace() {
       }
     }
   }
+
+  // maybe need to write the read disk_index into files back.
 
   end_ = std::chrono::system_clock::now();
   auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ - begin_);
@@ -335,6 +348,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
 
   di.key = toInt(key);
   if (m_thread_id == 0xffff) {
+    stage_ = kWriteStage; // 0 stands for write.
     auto thread_pid = pthread_self();
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
@@ -388,6 +402,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   // init the read map.
   static std::once_flag init_mptr;
   std::call_once (init_mptr, [this] {
+    stage_ = kReadStage; // Read
     BEGIN_POINT(begin_build_hash_table);
     BuildHashTable(true);
     END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
@@ -486,13 +501,19 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
   // init the read map.
   static std::once_flag init_range;
   std::call_once (init_range, [this] {
+    stage_ = kRangeStage; // 2 for range scan.
     DEBUG << "start the thread for range\n";
     std::thread write_thread(&EngineRace::RangeEntry, this);
     write_thread.detach();
 
     BEGIN_POINT(begin_build_hash_table);
-    BuildHashTable(false/*read all index into single vector*/);
-    hash_.Sort();
+    if (!hash_.CopyToAll()) {
+      // if copy failed, then need to read from disk.
+      // TODO: need to deal with the duplicated keys in 64Mkv
+      BuildHashTable(false/*read all index into single vector*/);
+    }
+    auto &all = hash_.GetAll();
+    std::sort(all.begin(), all.end());
     END_POINT(end_build_hash_table, begin_build_hash_table, "build_hash_time");
   });
 
@@ -510,6 +531,8 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
   }
 
   auto &all = hash_.GetAll();
+
+  DEBUG << "all.size = " << all.size() << std::endl;
   auto start_pos = all.begin();
   // if not the start of begin
   // use binary search find the position.

@@ -36,16 +36,21 @@ struct disk_index {
   disk_index(uint64_t k, uint32_t fn, uint32_t ff) :
     key(k), file_no(fn), file_offset(ff) {
   }
+
   disk_index() { }
+
   bool operator < (const uint64_t k) const {
     return key < k;
   }
+
   bool operator < (const disk_index &x) const {
     return key < x.key;
   }
+
   bool operator == (const disk_index &k) const {
     return key == k.key && file_no == k.file_no && file_offset == file_offset;
   }
+
   bool operator != (const disk_index &k) {
     return key != k.key || file_no != k.file_no || file_offset != file_offset;
   }
@@ -53,12 +58,15 @@ struct disk_index {
   bool is_valid() const {
     return !(file_no == 0xffffffff && file_offset == 0xffffffff);
   }
+
   void set_file_no(int thread_id, int fn) {
     file_no = (thread_id<<16) | fn;
   }
+
   int get_thrad_id() const {
     return file_no >> 16;
   }
+
   int get_file_no() const {
     return file_no & 0xffff;
   }
@@ -84,6 +92,11 @@ class HashTreeTable {
   // for range scan, return all the items
   // in a single vector.
   std::vector<struct disk_index> &GetAll() { return all_; }
+
+  // copy to all vector.
+  // return: true have copy
+  //         false, not copy.
+  bool CopyToAll();
 
  public:
   void Init(bool is_hash) {
@@ -276,6 +289,12 @@ class EngineRace : public Engine  {
  private:
   std::string dir_;
   FileLock* db_lock_ = nullptr;
+
+  // -1 init stage
+  // 0 write
+  // 1 read
+  // 2 range
+  int stage_ = kInitStage;
 
   // hash tree table.
   HashTreeTable hash_;
