@@ -310,22 +310,11 @@ EngineRace::~EngineRace() {
     }
   }
 
-  // maybe need to write the read disk_index into files back.
-
   end_ = std::chrono::system_clock::now();
   auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ - begin_);
   std::cout << "Total Time " << diff.count() / kNanoToMS << " (micro second)" << std::endl;
-}
 
-// get the index dir name.
-std::string EngineRace::index_dir(int thread_id) {
-  std::string index_dir = file_name_ + kMetaDirName + "/" + std::to_string(thread_id);
-  return index_dir;
-}
-
-std::string EngineRace::data_dir(int thread_id) {
-  std::string data_dir = file_name_ + kDataDirName + "/" + std::to_string(thread_id);
-  return data_dir;
+  DEBUG << "stage_ = " << stage_ << " ~EngineRace() close\n";
 }
 
 
@@ -562,5 +551,6 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
   vi.cond_.wait(l, [&vi] { return vi.is_done; });
   return kSucc;
 }
+
 }  // namespace polar_race
 

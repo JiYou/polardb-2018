@@ -281,10 +281,6 @@ class EngineRace : public Engine  {
   void RangeEntry();
   void BuildHashTable(bool is_hash);
   std::string file_name_;
-  // every writer just write content into
-  // the thread id related dir.
-  std::string data_dir(int thread_id);
-  std::string index_dir(int thread_id);
 
  private:
   std::string dir_;
