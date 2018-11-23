@@ -238,10 +238,12 @@ class Queue {
      * So, if find the items are smaller, wait for some nano seconds.
      */
     void Pop(std::vector<KVItem*> *vs, bool is_write=true) {
-        if (is_write) {
+        if (is_write && !has_wait) {
           for (int i = 0; i < 1024 && Size() < kMaxThreadNumber; i++) {
-            std::this_thread::sleep_for(std::chrono::nanoseconds(1000000));
+            DEBUG << "i = " << i << "Q size = " << Size() << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(1));
           }
+          has_wait = true;
         }
         std::unique_lock<std::mutex> lck(qlock_);
         consume_.wait(lck, [&] {return !q_.empty(); });
@@ -249,7 +251,12 @@ class Queue {
         q_.clear();
         produce_.notify_all();
     }
+
+  void SetNoWait() {
+    has_wait = true;
+  }
   private:
+    bool has_wait = false;
     std::vector<KVItem*> q_;
     std::mutex qlock_;
     std::condition_variable produce_;

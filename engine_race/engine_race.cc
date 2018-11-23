@@ -500,7 +500,12 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper,
   // init the read map.
   static std::once_flag init_range;
   std::call_once (init_range, [this] {
+    if (stage_ == kReadStage) {
+      q_.SetNoWait();
+    }
+
     stage_ = kRangeStage; // 2 for range scan.
+
     DEBUG << "start the thread for range\n";
     std::thread write_thread(&EngineRace::RangeEntry, this);
     write_thread.detach();
