@@ -147,6 +147,7 @@ bool HashTreeTable::CopyToAll() {
 }
 
 void HashTreeTable::Save(const char *file_name) {
+  BEGIN_POINT(begin_save_index);
   int fd = open(file_name, O_WRONLY | O_CREAT | O_TRUNC | O_NONBLOCK | O_NOATIME, 0644);
   if (fd < 0 ) {
     DEBUG << "open " << file_name << "failed\n";
@@ -164,6 +165,7 @@ void HashTreeTable::Save(const char *file_name) {
   }
   close(fd);
   DEBUG << "save all index to " << file_name << std::endl;
+  END_POINT(end_save_index, begin_save_index, "save_all_time_ms");
 }
 
 bool HashTreeTable::Load(const char *file_name) {
@@ -476,6 +478,13 @@ void EngineRace::RangeEntry() {
   struct aio_env_single read_aio(-1, true/*read*/, true/*buf*/);
   std::vector<visitor_item*> vs;
 
+  int cnt = 0;
+  std::thread thd_exit([&]{
+    std::this_thread::sleep_for(std::chrono::seconds(300));
+    DEBUG << "cnt = " << cnt << std::endl;
+    exit(-1);
+  });
+  thd_exit.detach();
   DEBUG << "start range entry\n";
 
   struct kv_item {
@@ -566,6 +575,7 @@ void EngineRace::RangeEntry() {
     while (from != end_pos) {
       buffer_q.Pop(&read_kv);
       from += read_kv.size();
+      cnt += read_kv.size();
       for (auto &kv: read_kv) {
         PolarString k((char*)(&kv.key), kMaxKeyLen);
         PolarString v(kv.buf, kPageSize);
