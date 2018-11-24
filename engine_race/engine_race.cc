@@ -484,20 +484,47 @@ void EngineRace::RangeEntry() {
     uint64_t key;
     char *buf;
   };
-
   Queue<kv_item> buffer_q(kPageSize); // 4K * 4K ~= 16MB
   buffer_q.SetNoWait();
 
   struct buf_mgr {
     char *buf = nullptr;
     std::vector<char*> free_list;
+    std::mutex lock;
+    std::condition_variable cond;
     buf_mgr() {
       buf = GetAlignedBuffer(k16MB);
+      free_list.resize(k16MB / kPageSize);
+      free_list.clear();
+      for (uint64_t i = 0; i < k16MB / kPageSize; i++) {
+        free_list.push_back(buf + kPageSize);
+      }
     }
     ~buf_mgr() {
       free(buf);
     }
+    char *GetFreeBuffer() {
+      std::unique_lock<std::mutex> l(lock);
+      cond.wait(l, [&]{ return !free_list.empty(); });
+      char *x = free_list.back();
+      free_list.pop_back();
+      return x;
+    }
+    void PutFreeBuffer(char *x) {
+      std::unique_lock<std::mutex> l(lock);
+      free_list.push_back(x);
+      cond.notify_one();
+    }
+    void Copy(char *dst, char *src) {
+      // both are page aligned.
+      uint64_t *d = reinterpret_cast<uint64_t*>(dst);
+      uint64_t *s = reinterpret_cast<uint64_t*>(src);
+      for (uint64_t i = 0; i < kPageSize / sizeof(uint64_t); i++) {
+        *d++ = *s++;
+      }
+    }
   };
+  buf_mgr bm; // buffer manager
 
   while (!stop_) {
     q_.Pop(&vs);
@@ -515,8 +542,10 @@ void EngineRace::RangeEntry() {
     auto end_pos = vs[0]->end;
 
     // when pick up, then generate new thread.
-/*
+    // read all the item into queue.
+    bool read_over = false;
     std::thread thd_disk_read([&] {
+      kv_item one_kv;
       for (auto iter = start_pos; iter != end_pos; iter++) {
         cnt ++;
         uint32_t file_no = iter->file_no;
@@ -531,42 +560,50 @@ void EngineRace::RangeEntry() {
         read_aio.SetFD(data_fds_[data_dir][sub_file_no]);
         read_aio.Prepare(file_offset);
         read_aio.Submit();
+/*
+        DEBUG << "begin to the free buffer\n";
+        char *x = bm.GetFreeBuffer();
+        DEBUG << "get free buffer done\n";
+        one_kv.key = toBack(k64);
+        one_kv.buf = x;
+*/
         read_aio.WaitOver();
+//        bm.Copy(x, read_aio.buf);
+        // push into queue.
+//        buffer_q.Push(one_kv);
+        one_kv.key = toBack(k64);
+        one_kv.buf = read_aio.buf;
+        PolarString k((char*)(&one_kv.key), kMaxKeyLen);
+        PolarString v(one_kv.buf, kPageSize);
+        for (auto &x: vs) {
+          x->vs->Visit(k, v);
+        }
 
       }
+      read_over = true;
     });
-*/
-
-    for (auto iter = start_pos; iter != end_pos; iter++) {
-      cnt ++;
-      uint32_t file_no = iter->file_no;
-      uint32_t file_offset = iter->file_offset;
-      uint64_t k64 = iter->key;
-
-      // then begin to get the data dir.
-      int data_dir = file_no >> 16;
-      int sub_file_no = file_no & 0xffff;
-      // begin to find the key & pos
-      // TODO use non-block read to count the bytes read then copy to value.
-      read_aio.SetFD(data_fds_[data_dir][sub_file_no]);
-      read_aio.Prepare(file_offset);
-      read_aio.Submit();
-      read_aio.WaitOver();
-
-      k64 = toBack(k64);
-      PolarString k((char*)(&k64), kMaxKeyLen);
-      PolarString v(read_aio.buf, kPageSize);
-
-      for (auto &x: vs) {
-        x->vs->Visit(k, v);
+/*
+    std::vector<kv_item> read_kv;
+    while (!read_over) {
+      buffer_q.Pop(&read_kv);
+      for (auto &kv: read_kv) {
+        PolarString k((char*)(&kv.key), kMaxKeyLen);
+        PolarString v(kv.buf, kPageSize);
+        for (auto &x: vs) {
+          x->vs->Visit(k, v);
+        }
+        DEBUG << "put free buffer\n";
+        bm.PutFreeBuffer(kv.buf);
+        DEBUG << "put free buffer done\n";
       }
     }
+*/
 
+    thd_disk_read.join();
     for (auto &v: vs) {
       v->feed_back();
     }
     vs.clear();
-//    thd_disk_read.join();
   }
 }
 
