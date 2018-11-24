@@ -536,7 +536,6 @@ void EngineRace::RangeEntry() {
     std::thread thd_disk_read([&] {
       kv_item one_kv;
       for (auto iter = start_pos; iter != end_pos; iter++) {
-        cnt ++;
         uint32_t file_no = iter->file_no;
         uint32_t file_offset = iter->file_offset;
         uint64_t k64 = iter->key;
