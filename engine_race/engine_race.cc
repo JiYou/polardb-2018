@@ -491,7 +491,7 @@ void EngineRace::RangeEntry() {
     uint64_t key;
     char *buf;
   };
-  Queue<kv_item> buffer_q(kPageSize); // 4K * 4K ~= 16MB
+  Queue<kv_item> buffer_q(65536ull); // 256MB / 4K = 64K
   buffer_q.SetNoWait();
 
   struct buf_mgr {
@@ -500,10 +500,10 @@ void EngineRace::RangeEntry() {
     std::mutex lock;
     std::condition_variable cond;
     buf_mgr() {
-      buf = GetAlignedBuffer(k16MB);
-      free_list.resize(k16MB / kPageSize);
+      buf = GetAlignedBuffer(k256MB);
+      free_list.resize(k256MB / kPageSize);
       free_list.clear();
-      for (uint64_t i = 0; i < k16MB / kPageSize; i++) {
+      for (uint64_t i = 0; i < k256MB / kPageSize; i++) {
         free_list.push_back(buf + i*kPageSize);
       }
     }

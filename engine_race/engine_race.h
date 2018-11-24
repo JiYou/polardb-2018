@@ -267,6 +267,93 @@ class Queue {
     size_t cap_ = kMaxQueueSize;
 };
 
+template<int numberOfEvent>
+struct aio_env_range {
+  aio_env_range() {
+    // prepare the io context.
+    memset(&ctx, 0, sizeof(ctx));
+    if (io_setup(numberOfEvent, &ctx) < 0) {
+      DEBUG << "Error in io_setup" << std::endl;
+    }
+
+    timeout.tv_sec = 0;
+    timeout.tv_nsec = 0;
+
+    memset(&iocb, 0, sizeof(iocb));
+    iocbs = (struct iocb**) malloc(sizeof(struct iocb*) * numberOfEvent);
+    for (int i = 0; i < numberOfEvent; i++) {
+      iocbs[i] = iocb + i;
+      iocb[i].aio_lio_opcode = IO_CMD_PREAD;
+      iocb[i].aio_reqprio = 0;
+      iocb[i].u.c.nbytes = kPageSize;
+      // iocb->u.c.offset = offset;
+      // iocb->aio_fildes = fd;
+      // iocb->u.c.buf = buf;
+    }
+  }
+
+  void PrepareRead(int fd, uint64_t offset, char *out, uint32_t size) {
+    // prepare the io
+    iocb[index].aio_fildes = fd;
+    iocb[index].u.c.offset = offset;
+    iocb[index].u.c.buf = out;
+    iocb[index].u.c.nbytes = size;
+    iocb[index].aio_lio_opcode = IO_CMD_PREAD;
+    index++;
+  }
+
+  void PrepareWrite(int fd, uint64_t offset, char *out, uint32_t size) {
+    iocb[index].aio_fildes = fd;
+    iocb[index].u.c.offset = offset;
+    iocb[index].u.c.buf = out;
+    iocb[index].u.c.nbytes = size;
+    iocb[index].aio_lio_opcode = IO_CMD_PWRITE;
+    index++;
+  }
+
+  void Clear() {
+    index = 0;
+  }
+
+  RetCode Submit() {
+    if ((io_submit(ctx, index, iocbs)) != index) {
+      DEBUG << "io_submit meet error, " << std::endl;;
+      printf("io_submit error\n");
+      return kIOError;
+    }
+    return kSucc;
+  }
+
+  void WaitOver() {
+    int write_over_cnt = 0;
+    while (write_over_cnt != index) {
+      constexpr int min_number = 1;
+      int num_events = io_getevents(ctx, min_number, index, events, &timeout);
+      for (int i = 0; i < num_events; i++) {
+        wait_item *feed_back = reinterpret_cast<wait_item*>(events[i].data);
+        if (feed_back) {
+          feed_back->feed_back();
+        }
+      }
+      // need to call for (i = 0; i < num_events; i++) events[i].call_back();
+      write_over_cnt += num_events;
+    }
+  }
+
+  ~aio_env_range() {
+    io_destroy(ctx);
+  }
+
+  int fd = 0;
+  int index = 0;
+  io_context_t ctx;
+  struct iocb iocb[numberOfEvent];
+  // struct iocb* iocbs[numberOfEvent];
+  struct iocb** iocbs = nullptr;
+  struct io_event events[numberOfEvent];
+  struct timespec timeout;
+};
+
 class EngineRace : public Engine  {
  public:
   static RetCode Open(const std::string& name, Engine** eptr);

@@ -63,6 +63,7 @@ constexpr uint64_t k1KB = 1024;
 constexpr uint64_t kReadValueCnt = 1024;
 constexpr uint64_t k4MB = kPageSize * 1024;
 constexpr uint64_t k16MB = k4MB * 4;
+constexpr uint64_t k256MB = k4MB * 64;
 constexpr uint64_t kMaxIndexSize = 1024 * 1024 * 1024; // 1GB
 //constexpr uint64_t kMaxIndexSize{2 * k16MB * 64ull}; // 2GB
 constexpr uint64_t kBigFileSize{263433748480};
