@@ -477,7 +477,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
 void EngineRace::RangeEntry() {
   // read 1024 kv at a time.
   // every item alread have buffer.
-  constexpr int aio_size = 1024;
+  constexpr int aio_size = 128;
   struct aio_env_single read_aio[aio_size];
 
   int cnt = 0;
