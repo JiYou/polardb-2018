@@ -519,6 +519,7 @@ void EngineRace::RangeEntry() {
        read_aio[aio_iter].Submit();
        jter++; aio_iter++;
     }
+    cnt += aio_size;
     aio_iter = 0;
 
     for (auto iter = start_pos; iter != end_pos; iter++) {
@@ -544,6 +545,7 @@ void EngineRace::RangeEntry() {
         read_aio[aio_iter].Prepare(file_offset);
         read_aio[aio_iter].Submit();
         jter++;
+        cnt++;
       }
 
       aio_iter++;
