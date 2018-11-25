@@ -132,7 +132,7 @@ class HashTreeTable {
 
 // aio just for read operations.
 struct aio_env_single {
-  aio_env_single(int fd_, bool read=true, bool alloc=true) {
+  aio_env_single(int fd_=-1, bool read=true, bool alloc=true) {
     fd = fd_;
     memset(&ctx, 0, sizeof(ctx));
     if (io_setup(kSingleRequest, &ctx) < 0) {

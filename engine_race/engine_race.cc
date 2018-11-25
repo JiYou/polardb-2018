@@ -475,9 +475,10 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
 }
 
 void EngineRace::RangeEntry() {
-  aio_env_range<1024> read_aio;
-
-  std::vector<visitor_item*> vs;
+  // read 1024 kv at a time.
+  // every item alread have buffer.
+  constexpr int aio_size = 1024;
+  struct aio_env_single read_aio[aio_size];
 
   int cnt = 0;
   std::thread thd_exit([&]{
@@ -488,44 +489,7 @@ void EngineRace::RangeEntry() {
   thd_exit.detach();
   DEBUG << "start range entry\n";
 
-  struct kv_item {
-    uint64_t key;
-    char *buf;
-  };
-  Queue<kv_item> buffer_q(65536ull); // 256MB / 4K = 64K
-  buffer_q.SetNoWait();
-
-  struct buf_mgr {
-    char *buf = nullptr;
-    std::vector<char*> free_list;
-    std::mutex lock;
-    std::condition_variable cond;
-    buf_mgr() {
-      buf = GetAlignedBuffer(k256MB);
-      free_list.resize(k256MB / kPageSize);
-      free_list.clear();
-      for (uint64_t i = 0; i < k256MB / kPageSize; i++) {
-        free_list.push_back(buf + i*kPageSize);
-      }
-    }
-    ~buf_mgr() {
-      free(buf);
-    }
-    char *GetFreeBuffer() {
-      std::unique_lock<std::mutex> l(lock);
-      cond.wait(l, [&]{ return !free_list.empty(); });
-      char *x = free_list.back();
-      free_list.pop_back();
-      return x;
-    }
-    void PutFreeBuffer(char *x) {
-      std::unique_lock<std::mutex> l(lock);
-      free_list.push_back(x);
-      cond.notify_one();
-    }
-  };
-  buf_mgr bm; // buffer manager
-
+  std::vector<visitor_item*> vs;
   while (!stop_) {
     q_.Pop(&vs);
 
@@ -540,75 +504,44 @@ void EngineRace::RangeEntry() {
     // this is just for the assumption.
     auto start_pos = vs[0]->start;
     auto end_pos = vs[0]->end;
+    // read 1024 first.
+    int aio_iter = -1;
+    for (auto iter = start_pos; iter != end_pos; iter++) {
+      if (aio_iter == -1) {
+        // read_ahead 1024 item.
+        aio_iter = 0;
+        for (auto jter = iter; jter != end_pos && aio_iter < aio_size; jter++, aio_iter++) {
+          uint32_t file_no = jter->file_no;
+          uint32_t file_offset = jter->file_offset;
+          int data_dir = file_no >> 16;
+          int sub_file_no = file_no & 0xffff;
+          int fd = data_fds_[data_dir][sub_file_no];
 
-    // when pick up, then generate new thread.
-    // read all the item into queue.
-    std::thread thd_disk_read([&] {
-      kv_item one_kv;
-      std::vector<kv_item> item_buffer;
-      item_buffer.resize(k1KB);
-      item_buffer.clear();
-      read_aio.Clear();
-      for (auto iter = start_pos; iter != end_pos; iter++) {
-        uint32_t file_no = iter->file_no;
-        uint32_t file_offset = iter->file_offset;
-        uint64_t k64 = iter->key;
-
-        // then begin to get the data dir.
-        int data_dir = file_no >> 16;
-        int sub_file_no = file_no & 0xffff;
-
-        // if full, send out the request at once.
-        if (read_aio.Full()) {
-          read_aio.Submit();
-          read_aio.WaitOver();
-          for (auto &x: item_buffer) {
-            buffer_q.Push(x);
-          }
-          item_buffer.clear();
-          read_aio.Clear();
+          read_aio[aio_iter].SetFD(fd);
+          read_aio[aio_iter].Prepare(file_offset);
+          read_aio[aio_iter].Submit();
         }
-
-        int fd = data_fds_[data_dir][sub_file_no];
-        char *x = bm.GetFreeBuffer();
-        one_kv.key = toBack(k64);
-        one_kv.buf = x;
-        read_aio.PrepareRead(fd, file_offset, x, kPageSize);
-        item_buffer.push_back(one_kv);
+        aio_iter = 0;
       }
-      if (read_aio.Size()) {
-        read_aio.Submit();
-        read_aio.WaitOver();
-        for (auto &x: item_buffer) {
-          buffer_q.Push(x);
-        }
-      }
-    });
 
-    // note: after read over, need to exit
-    // this thread.
-    std::vector<kv_item> read_kv;
-    auto from = start_pos;
-    while (from != end_pos) {
-      buffer_q.Pop(&read_kv);
-      from += read_kv.size();
-      cnt += read_kv.size();
-      for (auto &kv: read_kv) {
-        PolarString k((char*)(&kv.key), kMaxKeyLen);
-        PolarString v(kv.buf, kPageSize);
-        for (auto &x: vs) {
-          x->vs->Visit(k, v);
-        }
-        bm.PutFreeBuffer(kv.buf);
+      // begin to wait the related io over.
+      read_aio[aio_iter].WaitOver();
+      uint64_t k64 = toBack(iter->key);
+      PolarString k((char*)(&k64), kMaxKeyLen);
+      PolarString v(read_aio[aio_iter].buf, kPageSize);
+      for (auto &x: vs) {
+        x->vs->Visit(k, v);
+      }
+      aio_iter++;
+      if (aio_iter == aio_size) {
+        aio_iter = -1;
       }
     }
-    assert (from == end_pos);
 
     for (auto &v: vs) {
       v->feed_back();
     }
     vs.clear();
-    thd_disk_read.join();
   }
 }
 
