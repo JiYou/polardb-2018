@@ -505,26 +505,24 @@ void EngineRace::RangeEntry() {
     auto start_pos = vs[0]->start;
     auto end_pos = vs[0]->end;
     // read 1024 first.
-    int aio_iter = -1;
+    int aio_iter = 0;
+    auto jter = start_pos;
+    while (jter != end_pos && aio_iter != aio_size) {
+       uint32_t file_no = jter->file_no;
+       uint32_t file_offset = jter->file_offset;
+       int data_dir = file_no >> 16;
+       int sub_file_no = file_no & 0xffff;
+       int fd = data_fds_[data_dir][sub_file_no];
+
+       read_aio[aio_iter].SetFD(fd);
+       read_aio[aio_iter].Prepare(file_offset);
+       read_aio[aio_iter].Submit();
+       jter++; aio_iter++;
+    }
+    aio_iter = 0;
+
     for (auto iter = start_pos; iter != end_pos; iter++) {
-      if (aio_iter == -1) {
-        // read_ahead 1024 item.
-        aio_iter = 0;
-        for (auto jter = iter; jter != end_pos && aio_iter < aio_size; jter++, aio_iter++) {
-          uint32_t file_no = jter->file_no;
-          uint32_t file_offset = jter->file_offset;
-          int data_dir = file_no >> 16;
-          int sub_file_no = file_no & 0xffff;
-          int fd = data_fds_[data_dir][sub_file_no];
-
-          read_aio[aio_iter].SetFD(fd);
-          read_aio[aio_iter].Prepare(file_offset);
-          read_aio[aio_iter].Submit();
-        }
-        cnt += aio_size;
-        aio_iter = 0;
-      }
-
+      aio_iter %= aio_size;
       // begin to wait the related io over.
       read_aio[aio_iter].WaitOver();
       uint64_t k64 = toBack(iter->key);
@@ -533,10 +531,22 @@ void EngineRace::RangeEntry() {
       for (auto &x: vs) {
         x->vs->Visit(k, v);
       }
-      aio_iter++;
-      if (aio_iter == aio_size) {
-        aio_iter = -1;
+
+      // aio_iter is free.
+      if (jter != end_pos) {
+        uint32_t file_no = jter->file_no;
+        uint32_t file_offset = jter->file_offset;
+        int data_dir = file_no >> 16;
+        int sub_file_no = file_no & 0xffff;
+        int fd = data_fds_[data_dir][sub_file_no];
+
+        read_aio[aio_iter].SetFD(fd);
+        read_aio[aio_iter].Prepare(file_offset);
+        read_aio[aio_iter].Submit();
+        jter++;
       }
+
+      aio_iter++;
     }
 
     for (auto &v: vs) {
