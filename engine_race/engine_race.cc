@@ -475,7 +475,8 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
 }
 
 void EngineRace::RangeEntry() {
-  struct aio_env_single read_aio(-1, true/*read*/, true/*buf*/);
+  aio_env_range<1024> read_aio;
+
   std::vector<visitor_item*> vs;
 
   int cnt = 0;
@@ -544,6 +545,10 @@ void EngineRace::RangeEntry() {
     // read all the item into queue.
     std::thread thd_disk_read([&] {
       kv_item one_kv;
+      std::vector<kv_item> item_buffer;
+      item_buffer.resize(k1KB);
+      item_buffer.clear();
+      read_aio.Clear();
       for (auto iter = start_pos; iter != end_pos; iter++) {
         uint32_t file_no = iter->file_no;
         uint32_t file_offset = iter->file_offset;
@@ -552,19 +557,31 @@ void EngineRace::RangeEntry() {
         // then begin to get the data dir.
         int data_dir = file_no >> 16;
         int sub_file_no = file_no & 0xffff;
-        // begin to find the key & pos
-        // TODO use non-block read to count the bytes read then copy to value.
-        read_aio.SetFD(data_fds_[data_dir][sub_file_no]);
-        read_aio.Prepare(file_offset);
-        read_aio.Submit();
 
+        // if full, send out the request at once.
+        if (read_aio.Full()) {
+          read_aio.Submit();
+          read_aio.WaitOver();
+          for (auto &x: item_buffer) {
+            buffer_q.Push(x);
+          }
+          item_buffer.clear();
+          read_aio.Clear();
+        }
+
+        int fd = data_fds_[data_dir][sub_file_no];
         char *x = bm.GetFreeBuffer();
         one_kv.key = toBack(k64);
         one_kv.buf = x;
-
+        read_aio.PrepareRead(fd, file_offset, x, kPageSize);
+        item_buffer.push_back(one_kv);
+      }
+      if (read_aio.Size()) {
+        read_aio.Submit();
         read_aio.WaitOver();
-        memcpy(x, read_aio.buf, kPageSize);
-        buffer_q.Push(one_kv);
+        for (auto &x: item_buffer) {
+          buffer_q.Push(x);
+        }
       }
     });
 

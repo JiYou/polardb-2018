@@ -315,6 +315,14 @@ struct aio_env_range {
     index = 0;
   }
 
+  int Size() const {
+    return index;
+  }
+
+  bool Full() {
+    return index == numberOfEvent;
+  }
+
   RetCode Submit() {
     if ((io_submit(ctx, index, iocbs)) != index) {
       DEBUG << "io_submit meet error, " << std::endl;;
