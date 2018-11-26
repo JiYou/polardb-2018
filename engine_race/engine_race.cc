@@ -351,7 +351,7 @@ void EngineRace::init_read() {
     data_fds_[x].resize(files.size()+1);
     for (auto &f: files) {
       auto file_name = sub_dir_name + "/" + f;
-      auto fd = open(file_name.c_str(), O_RDONLY|O_DIRECT | O_NOATIME, 0644);
+      auto fd = open(file_name.c_str(), O_RDONLY | O_DIRECT | O_NOATIME, 0644);
       if (fd < 0) {
         DEBUG << "can not open file " << file_name << std::endl;
         return;
@@ -535,6 +535,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   // then begin to get the data dir.
   int data_dir = file_no >> 16;
   int sub_file_no = file_no & 0xffff;
+
   // begin to find the key & pos
   // TODO use non-block read to count the bytes read then copy to value.
   read_aio.SetFD(data_fds_[data_dir][sub_file_no]);
@@ -559,33 +560,102 @@ void EngineRace::RangeEntry() {
   DEBUG << "start range entry\n";
 
   // open the index file without cache.
-  int fd = open(AllIndexFile(), O_RDONLY | O_NONBLOCK | O_NOATIME | O_DIRECT, 0644);
-  if (fd < 0) {
+  int index_fd = open(AllIndexFile(), O_RDONLY | O_NONBLOCK | O_NOATIME | O_DIRECT, 0644);
+  if (index_fd < 0) {
     DEBUG << "can not open all the index files\n";
     return;
   }
-  char *buffer = GetAlignedBuffer(k16MB);
-  auto read_file = [&]() -> int {
+  char *index_buffer = GetAlignedBuffer(k16MB);
+  if (!index_buffer) {
+    DEBUG << "can not open the index buffer\n";
+    return;
+  }
+
+  auto read_file = [](int fd, char *buffer, size_t size) -> int {
     int bytes = 0;
-    while ((bytes = read(fd, buffer, k16MB)) < 0) {
+    while ((bytes = read(fd, buffer, size)) < 0) {
       if (errno != EAGAIN) {
-        DEBUG << "read filer " << AllIndexFile() << " meet error\n";
         return 0;
       }
     }
     return bytes;
   };
 
+  auto get_file_content = [&read_file](const char *path, char *buf, int max_size) {
+    struct stat stat_buf;
+    int rc = stat(path, &stat_buf);
+    if (rc) {
+      // file may no exist.
+      return;
+    }
+    auto &flen = stat_buf.st_size;
+    if (flen > max_size) {
+      DEBUG << "find " << path << " size = " << flen << " > 20MB\n";
+      assert (flen <= max_size);
+      return;
+    }
+
+    int fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT, 0644);
+    if (fd < 0) {
+      DEBUG << "open " << path << "failed\n";
+      return;
+    }
+    auto bytes = read_file(fd, buf, flen);
+    assert (bytes == flen); 
+    close(fd);
+  };
+
+  const std::string data_path = file_name_ + kDataDirName;
   std::vector<visitor_item*> vs;
+  char *shard_buffer[kMaxThreadNumber] = {nullptr};
+  for (int i = 0; i < kMaxThreadNumber; i++) {
+    // every shard contains 20MB for file cache.
+    shard_buffer[i] = GetAlignedBuffer(k16MB + k4MB);
+    if (!shard_buffer[i]) {
+      DEBUG << "alloc memory failed for shard " << i << std::endl;
+      return;
+    }
+  }
+
   while (!stop_) {
     q_.Pop(&vs);
     DEBUG << "get vs size = " << vs.size() << std::endl;
 
     // scan the range. If can use the read cahce.
     int bytes = 0;
-    while ((bytes = read_file()) > 0) {
-      // scan the index.
+    int open_file_no = -1;
+    while ((bytes = read_file(index_fd, index_buffer, k16MB)) > 0) {
+      uint32_t tail = bytes / sizeof(struct disk_index);
+      struct disk_index *di = (struct disk_index*) index_buffer;
+      for (uint32_t i = 0; i < tail; i++) {
+        auto ref = di[i];
+        uint32_t file_no = ref.file_no;
+        uint32_t file_offset = ref.file_offset;
+        int data_dir = file_no >> 16;
+        int sub_file_no = (file_no & 0xffff);
+
+        if (open_file_no != sub_file_no) {
+          open_file_no = sub_file_no;
+          char path[64];
+          for (int i = 0; i < kMaxThreadNumber; i++) {
+            sprintf(path, "%s/%d/%d", data_path.c_str(), i, sub_file_no + 1);
+            // NOTE: there maybe some files not exist
+            // but the buffer kept old content.
+            get_file_content(path, shard_buffer[i], k16MB + k4MB);
+          }
+        }
+
+        uint64_t k64 = toBack(ref.key);
+        char *pos = shard_buffer[data_dir] + file_offset;
+        PolarString k((char*)(&k64), kMaxKeyLen);
+        PolarString v(pos, kPageSize);
+
+        for (auto &x: vs) {
+          x->vs->Visit(k, v);
+        }
+      }
     }
+    lseek(index_fd, 0, SEEK_SET);
 
     for (auto &v: vs) {
       v->feed_back();
@@ -593,8 +663,12 @@ void EngineRace::RangeEntry() {
     vs.clear();
   }
 
-  free(buffer);
-  close(fd);
+  for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
+    free(shard_buffer[i]);
+  }
+
+  free(index_buffer);
+  close(index_fd);
 }
 
 RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Visitor &visitor) {
@@ -678,35 +752,31 @@ RetCode EngineRace::SlowRead(const PolarString &lower, const PolarString &upper,
 
   std::string data_path = file_name_ + kDataDirName;
   char path[64];
-  char value[kPageSize];
   for (auto iter = start_pos; iter != end_pos; iter++) {
       uint32_t file_no = iter->file_no;
       uint32_t file_offset = iter->file_offset;
       int data_dir = file_no >> 16;
       int sub_file_no = file_no & 0xffff;
-      sprintf(path, "%s/%d/%d", data_path.c_str(), data_dir, sub_file_no);
+      // NOTE!! file_no should add 1
+      // if want to open it directl
+      sprintf(path, "%s/%d/%d", data_path.c_str(), data_dir, sub_file_no + 1);
       int fd = open(path, O_RDONLY | O_NOATIME, 0644);
       if (fd < 0) {
         DEBUG << "can not open file " << path << std::endl;
         return kIOError;
       }
       lseek(fd, file_offset, SEEK_SET);
+      char *value = GetAlignedBuffer(kPageSize);
       if (read(fd, value, kPageSize) != kPageSize) {
         DEBUG << "read file meet error\n";
         return kIOError;
       }
       uint64_t k64 = toBack(iter->key);
       PolarString k((char*)(&k64), kMaxKeyLen);
-
-      // --
-      std::string longv;
-      assert (Read(k, &longv) == kSucc);
-      assert (memcmp(longv.c_str(), value, kPageSize) == 0);
-      //
-
       PolarString v(value, kPageSize);
       visitor.Visit(k, v);
       close(fd);
+      free(value);
   }
   free(all);
   return kSucc;

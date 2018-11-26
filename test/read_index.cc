@@ -21,13 +21,13 @@ static const char kDumpPath[] = "/tmp/test_dump";
 
 using namespace polar_race;
 
-int main() {
+int main(int argc, char **argv) {
   struct disk_index {
     uint64_t key;
     uint32_t file_no;
     uint32_t file_offset;
   };
-  int fd = open("/tmp/test_engine/ALL", O_RDONLY, 0644);
+  int fd = open(argv[1], O_RDONLY, 0644);
   // read 16 bytes every time.
   struct disk_index di;
   int cnt = 0;
