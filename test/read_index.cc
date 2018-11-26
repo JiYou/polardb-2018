@@ -27,7 +27,7 @@ int main() {
     uint32_t file_no;
     uint32_t file_offset;
   };
-  int fd = open("/tmp/test_engine/DB", O_RDONLY, 0644);
+  int fd = open("/tmp/test_engine/ALL", O_RDONLY, 0644);
   // read 16 bytes every time.
   struct disk_index di;
   int cnt = 0;

@@ -26,7 +26,6 @@
 
 namespace polar_race {
 
-
 #pragma pack(push, 1)
 // totaly 16 bytes.
 struct disk_index {
@@ -89,28 +88,12 @@ class HashTreeTable {
   // print Hash Mean StdDev size of hash shard.
   void PrintMeanStdDev();
 
-  // for range scan, return all the items
-  // in a single vector.
-  std::vector<struct disk_index> &GetAll() { return all_; }
-
-  // save all the index files into single file.
+  // merge sucket sort and write all kv into single file.
   void Save(const char *file_name);
-  bool Load(const char *file_name);
-
-  // copy to all vector.
-  // return: true have copy
-  //         false, not copy.
-  bool CopyToAll();
 
  public:
-  void Init(bool is_hash) {
-    if (is_hash) {
-      hash_.resize(kMaxBucketSize);
-    } else {
-      std::vector<std::vector<struct disk_index>>().swap(hash_);
-      all_.clear();
-    }
-    is_hash_ = is_hash;
+  void Init() {
+    hash_.resize(kMaxBucketSize);
   }
 
   HashTreeTable() { }
@@ -122,8 +105,6 @@ class HashTreeTable {
   HashTreeTable &operator=(const HashTreeTable&) = delete;
   HashTreeTable &operator=(const HashTreeTable&&) = delete;
  private:
-  bool is_hash_ = true;
-  std::vector<struct disk_index> all_;
   std::vector<std::vector<struct disk_index>> hash_;
  private:
   uint32_t compute_pos(uint64_t key);
@@ -367,7 +348,7 @@ class EngineRace : public Engine  {
   static RetCode Open(const std::string& name, Engine** eptr);
 
   explicit EngineRace(const std::string& dir)
-    : dir_(dir), q_(kMaxThreadNumber * 2) {
+    :  q_(kMaxThreadNumber * 2), dir_(dir) {
   }
 
   virtual ~EngineRace();
@@ -383,11 +364,25 @@ class EngineRace : public Engine  {
       Visitor &visitor) override;
 
  private:
-  void RangeEntry();
-  void BuildHashTable(bool is_hash);
   const char *AllIndexFile() { return all_index_file_.c_str(); }
   std::string all_index_file_;
   std::string file_name_;
+
+ private:
+  void RangeEntry();
+  RetCode SlowRead(const PolarString &l, const PolarString &u, Visitor &visitor);
+
+ // Read Stage
+ private:
+  void init_read();
+  HashTreeTable hash_; // for the read index.
+  std::vector<std::vector<int>> data_fds_; // for the data fd.
+
+ // Range Stage
+ private:
+  std::atomic<bool> stop_{false};
+  // queue for the range scan
+  Queue<visitor_item*> q_;
 
  private:
   std::string dir_;
@@ -399,22 +394,11 @@ class EngineRace : public Engine  {
   // 2 range
   int stage_ = kInitStage;
 
-  // hash tree table.
-  HashTreeTable hash_;
-
   // use to pin cpu on core.
   uint64_t max_cpu_cnt_ = 0;
   // tag for the thread id,
   // just increase.
   std::atomic<uint64_t> thread_id_{0};
-
-  // open all the data files.
-  std::vector<std::vector<int>> data_fds_;
-
-  std::atomic<bool> stop_{false};
-
-  // queue for the range scan
-  Queue<visitor_item*> q_;
 
   // time counter
   decltype(std::chrono::system_clock::now()) begin_;

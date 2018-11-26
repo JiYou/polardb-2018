@@ -78,6 +78,7 @@ constexpr uint64_t kMaxFileNumber = 65536;
 constexpr uint64_t kPathLength = 64; // path length
 constexpr uint64_t kMaxKVItem = 64000000; // 64M
 
+constexpr uint32_t kThreadShardNumber = 256;
 // is key/value disk_item type.
 constexpr uint32_t kValidType = 1;
 
@@ -124,14 +125,11 @@ struct read_item : public wait_item {
 
 struct disk_index;
 struct visitor_item : public wait_item {
-  std::vector<struct disk_index>::iterator start;
-  std::vector<struct disk_index>::iterator end;
+  uint64_t start;
+  uint64_t end;
   Visitor *vs = nullptr;
-  visitor_item(
-    std::vector<struct disk_index>::iterator s,
-    std::vector<struct disk_index>::iterator e,
-    Visitor *vis
-  ): start(s), end(e), vs(vis) { }
+  visitor_item(uint64_t s, uint64_t e, Visitor *vis):
+    start(s), end(e), vs(vis) { }
 };
 
 void ComputeMeanSteDev(const std::vector<size_t> &vs, double *mean, double *std);
