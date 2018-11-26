@@ -551,12 +551,14 @@ void EngineRace::RangeEntry() {
   // every item alread have buffer.
 
   int cnt = 0;
+/*
   std::thread thd_exit([&]{
     std::this_thread::sleep_for(std::chrono::seconds(300));
     DEBUG << "cnt = " << cnt << std::endl;
     exit(-1);
   });
   thd_exit.detach();
+*/
   DEBUG << "start range entry\n";
 
   // open the index file without cache.
