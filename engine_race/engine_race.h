@@ -227,7 +227,6 @@ class Queue {
             DEBUG << "i = " << i << "Q size = " << Size() << std::endl;
             std::this_thread::sleep_for(std::chrono::seconds(1));
           }
-          has_wait = true;
         }
         std::unique_lock<std::mutex> lck(qlock_);
         consume_.wait(lck, [&] {return !q_.empty(); });
