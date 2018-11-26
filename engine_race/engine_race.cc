@@ -550,7 +550,6 @@ void EngineRace::RangeEntry() {
   // read 1024 kv at a time.
   // every item alread have buffer.
 
-  int cnt = 0;
 /*
   std::thread thd_exit([&]{
     std::this_thread::sleep_for(std::chrono::seconds(300));
@@ -604,8 +603,6 @@ void EngineRace::RangeEntry() {
   const std::string data_path = file_name_ + kDataDirName;
   std::vector<visitor_item*> vs;
   char *shard_buffer[kMaxThreadNumber] = {nullptr};
-  uint32_t shard_cache_len[kMaxThreadNumber] = {0};
-  int shard_fds[kMaxThreadNumber] = {0};
   constexpr int64_t total_cache_size = 1342177280ll;
   char *total_cache = GetAlignedBuffer(total_cache_size); // 1280MB.
   if (!total_cache) {
@@ -631,15 +628,6 @@ void EngineRace::RangeEntry() {
         int sub_file_no = (file_no & 0xffff);
 
         if (open_file_no != sub_file_no) {
-          // close previous files.
-          for (int i = 0; i < kMaxThreadNumber; i++) {
-            if (shard_fds[i] > 0) {
-              close(shard_fds[i]);
-            }
-            shard_fds[i] = -1;
-            shard_cache_len[i] = 0;
-          }
-
           open_file_no = sub_file_no;
           char *head = total_cache;
           int64_t max_size = total_cache_size;
@@ -666,14 +654,9 @@ void EngineRace::RangeEntry() {
             int fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT | O_NONBLOCK, 0644);
             shard_buffer[i] = head;
             auto read_bytes = get_file_content(fd, flen, shard_buffer[i], max_size);
-            shard_cache_len[i] = read_bytes;
             // if all the content has read out
             // just close this file.
-            if (read_bytes == flen) {
-              close(fd);
-            } else {
-              shard_fds[i] = fd;
-            }
+            close(fd);
 
             head += read_bytes;
             max_size -= read_bytes;
@@ -691,13 +674,6 @@ void EngineRace::RangeEntry() {
       }
     }
     lseek(index_fd, 0, SEEK_SET);
-
-    for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
-      if (shard_fds[i] > 0) {
-        close(shard_fds[i]);
-      }
-      shard_fds[i] = -1;
-    }
 
     for (auto &v: vs) {
       v->feed_back();
@@ -722,26 +698,89 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
       // save it to all file.
       hash_.Save(AllIndexFile());
     }
-
-    DEBUG << "start the thread for range\n";
-    std::thread write_thread(&EngineRace::RangeEntry, this);
-    write_thread.detach();
   });
 
   // after sort, then begin to read the content.
-  uint64_t start = toInt(lower);
-  uint64_t end = toInt(upper);
   bool include_start = lower.empty();
   bool include_end = upper.empty();
 
-  if (include_start && include_end) {
-    visitor_item vi(start, end, &visitor);
-    q_.Push(&vi);
-    std::unique_lock<std::mutex> l(vi.lock_);
-    vi.cond_.wait(l, [&vi] { return vi.is_done; });
-    return kSucc;
+  if (!(include_start && include_end)) {
+    return SlowRead(lower, upper, visitor);
   }
-  return SlowRead(lower, upper, visitor);
+
+  static thread_local uint64_t m_thread_id = 0xffff;
+  static thread_local int index_fd = -1;
+  if (m_thread_id == 0xffff) {
+    auto thread_pid = pthread_self();
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    m_thread_id = thread_id_++;
+    CPU_SET(m_thread_id % max_cpu_cnt_, &cpuset);
+    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    }
+
+    index_fd = open(AllIndexFile(), O_RDONLY | O_NOATIME, 0644);
+    // scan the full range.
+    if (index_fd < 0) {
+      DEBUG << "Read file meet error\n";
+      return kIOError;
+    }
+  }
+
+
+  static thread_local struct disk_index di;
+  constexpr int size = sizeof(struct disk_index);
+  static thread_local int opened_file_no = -1;
+  static thread_local int shard_fds[kMaxThreadNumber] = {-1};
+
+  const std::string data_path = file_name_ + kDataDirName;
+  static thread_local char *buf = GetAlignedBuffer(kPageSize);
+  static thread_local char path[64];
+  if (!buf) {
+    DEBUG << "malloc 4k for value failed\n";
+    return kIOError;
+  }
+
+  while (read(index_fd, &di, size) == size) {
+    uint32_t file_no = di.file_no;
+    uint32_t file_offset = di.file_offset;
+    int data_dir = file_no >> 16;
+    int sub_file_no = (file_no & 0xffff) + 1;
+
+    if (opened_file_no != sub_file_no) {
+      for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
+        if (shard_fds[i] > 0) {
+          close(shard_fds[i]);
+          shard_fds[i] = -1;
+        }
+        sprintf(path, "%s/%d/%d", data_path.c_str(), i, sub_file_no);
+        shard_fds[i] = open(path, O_RDONLY | O_NOATIME, 0644);
+      }
+      opened_file_no = sub_file_no;
+    }
+
+    uint64_t k64 = toBack(di.key);
+    PolarString k((char*)(&k64), kMaxKeyLen);
+    // read the value from file content.
+    int fd = shard_fds[data_dir];
+    lseek(fd, file_offset, SEEK_SET);
+    if (read(fd, buf, kPageSize) != kPageSize) {
+      DEBUG << "read size not equal to kPageSize\n";
+      return kIOError;
+    }
+    PolarString v(buf, kPageSize);
+    visitor.Visit(k, v);
+  }
+
+  for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
+    if (shard_fds[i] > 0) {
+      close(shard_fds[i]);
+    }
+  }
+  close(index_fd);
+  return kSucc;
 }
 
 RetCode EngineRace::SlowRead(const PolarString &lower, const PolarString &upper, Visitor &visitor) {
