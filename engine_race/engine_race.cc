@@ -583,40 +583,34 @@ void EngineRace::RangeEntry() {
     return bytes;
   };
 
-  auto get_file_content = [&read_file](const char *path, char *buf, int max_size) {
+  auto get_file_length = [](const char *path) ->int {
     struct stat stat_buf;
     int rc = stat(path, &stat_buf);
     if (rc) {
-      // file may no exist.
-      return;
+      return -1;
     }
-    auto &flen = stat_buf.st_size;
-    if (flen > max_size) {
-      DEBUG << "find " << path << " size = " << flen << " > 20MB\n";
-      assert (flen <= max_size);
-      return;
-    }
+    return stat_buf.st_size;
+  };
 
-    int fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT, 0644);
-    if (fd < 0) {
-      DEBUG << "open " << path << "failed\n";
-      return;
+  auto get_file_content = [&read_file](int fd, int flen, char *buf, int max_size)  -> int {
+    auto read_len = std::min(flen, max_size);
+    auto bytes = read_file(fd, buf, read_len);
+    if (bytes != read_len) {
+      DEBUG << "read_file content meet error\n";
     }
-    auto bytes = read_file(fd, buf, flen);
-    assert (bytes == flen); 
-    close(fd);
+    return bytes;
   };
 
   const std::string data_path = file_name_ + kDataDirName;
   std::vector<visitor_item*> vs;
   char *shard_buffer[kMaxThreadNumber] = {nullptr};
-  for (int i = 0; i < kMaxThreadNumber; i++) {
-    // every shard contains 20MB for file cache.
-    shard_buffer[i] = GetAlignedBuffer(k16MB + k4MB);
-    if (!shard_buffer[i]) {
-      DEBUG << "alloc memory failed for shard " << i << std::endl;
-      return;
-    }
+  uint32_t shard_cache_len[kMaxThreadNumber] = {0};
+  int shard_fds[kMaxThreadNumber] = {0};
+  constexpr int64_t total_cache_size = 1342177280ll;
+  char *total_cache = GetAlignedBuffer(total_cache_size); // 1280MB.
+  if (!total_cache) {
+    DEBUG << "malloc memory for total_cache failed\n";
+    return;
   }
 
   while (!stop_) {
@@ -637,13 +631,52 @@ void EngineRace::RangeEntry() {
         int sub_file_no = (file_no & 0xffff);
 
         if (open_file_no != sub_file_no) {
+          // close previous files.
+          for (int i = 0; i < kMaxThreadNumber; i++) {
+            if (shard_fds[i] > 0) {
+              close(shard_fds[i]);
+            }
+            shard_fds[i] = -1;
+            shard_cache_len[i] = 0;
+          }
+
           open_file_no = sub_file_no;
+          char *head = total_cache;
+          int64_t max_size = total_cache_size;
           char path[64];
           for (int i = 0; i < kMaxThreadNumber; i++) {
+            // if no cache anymore.
+            if (max_size <= 0) {
+              continue;
+            }
+
+            // get the file size.
             sprintf(path, "%s/%d/%d", data_path.c_str(), i, sub_file_no + 1);
-            // NOTE: there maybe some files not exist
-            // but the buffer kept old content.
-            get_file_content(path, shard_buffer[i], k16MB + k4MB);
+            auto flen = get_file_length(path);
+            if (flen <= 0) {
+              continue;
+            }
+
+            if (flen > max_size) {
+              DEBUG << "File " << path << " length is " << flen << " > " << max_size << std::endl;
+              assert(flen <= max_size);
+            }
+
+            // read the file content out.
+            int fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT | O_NONBLOCK, 0644);
+            shard_buffer[i] = head;
+            auto read_bytes = get_file_content(fd, flen, shard_buffer[i], max_size);
+            shard_cache_len[i] = read_bytes;
+            // if all the content has read out
+            // just close this file.
+            if (read_bytes == flen) {
+              close(fd);
+            } else {
+              shard_fds[i] = fd;
+            }
+
+            head += read_bytes;
+            max_size -= read_bytes;
           }
         }
 
@@ -658,6 +691,13 @@ void EngineRace::RangeEntry() {
       }
     }
     lseek(index_fd, 0, SEEK_SET);
+
+    for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
+      if (shard_fds[i] > 0) {
+        close(shard_fds[i]);
+      }
+      shard_fds[i] = -1;
+    }
 
     for (auto &v: vs) {
       v->feed_back();
