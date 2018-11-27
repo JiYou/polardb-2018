@@ -137,20 +137,6 @@ void HashTreeTable::PrintMeanStdDev() {
         << " , " << "stdev = " << stdev << std::endl;
 }
 
-/*
-bool HashTreeTable::CopyToAll() {
-  if (!hash_.empty()) {
-    for (auto &vs: hash_) {
-      for (auto &x: vs) {
-        all_.push_back(x);
-      }
-    }
-    return true;
-  }
-  return false;
-}
-*/
-
 void HashTreeTable::Save(const char *file_name) {
   BEGIN_POINT(begin_save_index);
   int fd = open(file_name, O_WRONLY | O_CREAT | O_TRUNC | O_NONBLOCK | O_NOATIME, 0644);
@@ -549,15 +535,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
 void EngineRace::RangeEntry() {
   // read 1024 kv at a time.
   // every item alread have buffer.
-
-/*
-  std::thread thd_exit([&]{
-    std::this_thread::sleep_for(std::chrono::seconds(300));
-    DEBUG << "cnt = " << cnt << std::endl;
-    exit(-1);
-  });
-  thd_exit.detach();
-*/
   DEBUG << "start range entry\n";
 
   // open the index file without cache.
@@ -566,7 +543,7 @@ void EngineRace::RangeEntry() {
     DEBUG << "can not open all the index files\n";
     return;
   }
-  char *index_buffer = GetAlignedBuffer(k16MB);
+  char *index_buffer = GetAlignedBuffer(k16MB*16); // 256MB
   if (!index_buffer) {
     DEBUG << "can not open the index buffer\n";
     return;
@@ -621,7 +598,7 @@ void EngineRace::RangeEntry() {
       uint32_t tail = bytes / sizeof(struct disk_index);
       struct disk_index *di = (struct disk_index*) index_buffer;
       for (uint32_t i = 0; i < tail; i++) {
-        auto ref = di[i];
+        auto &ref = di[i];
         uint32_t file_no = ref.file_no;
         uint32_t file_offset = ref.file_offset;
         int data_dir = file_no >> 16;
@@ -633,10 +610,8 @@ void EngineRace::RangeEntry() {
           int64_t max_size = total_cache_size;
           char path[64];
           for (int i = 0; i < kMaxThreadNumber; i++) {
-            // if no cache anymore.
-            if (max_size <= 0) {
-              continue;
-            }
+            // TODO: in real project the cache maybe not enough to
+            // read all the input files.
 
             // get the file size.
             sprintf(path, "%s/%d/%d", data_path.c_str(), i, sub_file_no + 1);
@@ -654,8 +629,6 @@ void EngineRace::RangeEntry() {
             int fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT | O_NONBLOCK, 0644);
             shard_buffer[i] = head;
             auto read_bytes = get_file_content(fd, flen, shard_buffer[i], max_size);
-            // if all the content has read out
-            // just close this file.
             close(fd);
 
             head += read_bytes;
@@ -681,10 +654,7 @@ void EngineRace::RangeEntry() {
     vs.clear();
   }
 
-  for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
-    free(shard_buffer[i]);
-  }
-
+  free(total_cache);
   free(index_buffer);
   close(index_fd);
 }
@@ -698,6 +668,7 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
       // save it to all file.
       hash_.Save(AllIndexFile());
     }
+    stage_ = kRangeStage;
   });
 
   // after sort, then begin to read the content.
@@ -728,7 +699,6 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
       return kIOError;
     }
   }
-
 
   static thread_local struct disk_index di;
   constexpr int size = sizeof(struct disk_index);
