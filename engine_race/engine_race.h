@@ -5,6 +5,16 @@
 #include "spin_lock.h"
 #include "util.h"
 #include "engine_aio.h"
+#include "engine_spsc.h"
+
+#include <pthread.h>
+#include <assert.h>
+#include <stdio.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/mman.h>
 
 #include <assert.h>
 #include <stdint.h>
@@ -347,7 +357,7 @@ class EngineRace : public Engine  {
   static RetCode Open(const std::string& name, Engine** eptr);
 
   explicit EngineRace(const std::string& dir)
-    :  q_(kMaxThreadNumber * 2), dir_(dir) {
+    :  dir_(dir) {
   }
 
   virtual ~EngineRace();
@@ -378,10 +388,128 @@ class EngineRace : public Engine  {
   std::vector<std::vector<int>> data_fds_; // for the data fd.
 
  // Range Stage
+ // TODO here is just for 64 threads: call these threads visit-thread.
+ // there are other 2 thread.
+ // - read_index thread.
+ // - read_data thread
  private:
-  std::atomic<bool> stop_{false};
-  // queue for the range scan
-  Queue<visitor_item*> q_;
+  void ReadIndexEntry();
+  void ReadDataEntry();
+
+  int read_file(int fd, char *buffer, size_t size) {
+    int bytes = 0;
+    while ((bytes = read(fd, buffer, size)) < 0) {
+      if (errno != EAGAIN) {
+        return 0;
+      }
+    }
+    return bytes;
+  }
+  int get_file_length(const char *path) {
+    struct stat stat_buf;
+    int rc = stat(path, &stat_buf);
+    if (rc) {
+      return -1;
+    }
+    return stat_buf.st_size;
+  }
+
+  uint64_t buf_size_ = 0;
+  char *index_buf_ = nullptr;
+  char *data_buf_[kMaxThreadNumber] = {nullptr};
+  char *total_cache_ = nullptr;
+
+  // notify cache-thread to read index.
+  // notify data-thread the index data is ready.
+  int ask_read_index_cnt_ = 1;
+  std::mutex read_index_lock_;
+  std::condition_variable read_index_cond_;
+  void ask_to_read_index() {
+    read_index_lock_.lock();
+    ask_read_index_cnt_++;
+    if (ask_read_index_cnt_ == kMaxThreadNumber) {
+      read_index_cond_.notify_one();
+    }
+    read_index_lock_.unlock();
+  }
+  void is_ok_to_read_index() {
+    std::unique_lock<std::mutex> l(read_index_lock_);
+    read_index_cond_.wait(l, [this] { return ask_read_index_cnt_ == kMaxThreadNumber; });
+    // when active this is just called by cache-thread.
+    // so, it's ok to change the value.
+    ask_read_index_cnt_ = 1;
+  }
+
+  int ask_read_data_cnt_ = 1;
+  std::mutex read_data_lock_;
+  std::condition_variable read_data_cond_;
+  void ask_to_read_data() {
+    read_data_lock_.lock();
+    ask_read_data_cnt_++;
+    if (ask_read_data_cnt_ == kMaxThreadNumber) {
+      read_data_cond_.notify_one();
+    }
+    read_data_lock_.unlock();
+  }
+  void is_ok_to_read_data() {
+    std::unique_lock<std::mutex> l(read_data_lock_);
+    read_data_cond_.wait(l, [this] { return ask_read_data_cnt_ == kMaxThreadNumber; });
+    // this is active cache-thread
+    // so, it's ok the change the value.
+    ask_read_data_cnt_ = 1;
+  }
+
+  bool ready_visit_index_ = false;
+  std::atomic<int> wake_up_index_cnt_ {kMaxThreadNumber};
+  std::mutex visit_index_lock_;
+  std::condition_variable visit_index_cond_;
+  // read-index thread -> 64 visit-thread
+  // you can visit key now.
+  void ask_to_visit_index() {
+    visit_index_lock_.lock();
+    ready_visit_index_ = true;
+    wake_up_index_cnt_ = 1;
+    visit_index_cond_.notify_all(); // wake-up 64 visit-threads
+    visit_index_lock_.unlock();
+  }
+  // 64 visit-thread -> read-index thread
+  // is ok to visit the index?
+  void is_ok_to_visit_index() {
+    std::unique_lock<std::mutex> l(visit_index_lock_);
+    visit_index_cond_.wait(l, [this] {
+      return ready_visit_index_ && wake_up_index_cnt_ != kMaxThreadNumber;
+    });
+    // here all the visit-thread will be wake-up.
+    if (++wake_up_index_cnt_ == kMaxThreadNumber) {
+      ready_visit_index_ = false;
+    }
+  }
+
+  bool ready_visit_data_ = false;
+  std::atomic<int> wake_up_data_cnt_ {kMaxThreadNumber};
+  std::mutex visit_data_lock_;
+  std::condition_variable visit_data_cond_;
+  // read-data thread -> 64 visit-thread
+  // you can visit key now.
+  void ask_to_visit_data() {
+    visit_data_lock_.lock();
+    ready_visit_data_ = true;
+    wake_up_data_cnt_ = 1;
+    visit_data_cond_.notify_all(); // wake-up 64 visit-threads
+    visit_data_lock_.unlock();
+  }
+  // 64 visit-thread -> read-data thread
+  // is ok to visit the data?
+  void is_ok_to_visit_data() {
+    std::unique_lock<std::mutex> l(visit_data_lock_);
+    visit_data_cond_.wait(l, [this] {
+      return ready_visit_data_ && wake_up_data_cnt_ != kMaxThreadNumber;
+    });
+    // here all the visit-thread will be wake-up.
+    if (++wake_up_data_cnt_ == kMaxThreadNumber) {
+      ready_visit_data_ = false;
+    }
+  }
 
  private:
   std::string dir_;
