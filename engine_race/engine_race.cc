@@ -741,6 +741,8 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
       return kIOError;
     }
     PolarString v(buf, kPageSize);
+    k.set_change();
+    v.set_change();
     visitor.Visit(k, v);
   }
 
