@@ -190,7 +190,7 @@ uint64_t toInt(const std::string &s) {
 }
 
 uint64_t toInt(const PolarString &ps) {
-  return toInt(ps.ToString());
+  return toInt(ps.data(), ps.size());
 }
 
 uint16_t head(const char *s, uint64_t n) {
@@ -202,7 +202,7 @@ uint16_t head(const std::string &s) {
 }
 
 uint16_t head(const PolarString &ps) {
-  return head(ps.ToString());
+  return head(ps.data(), ps.size());
 }
 
 uint16_t head(const uint64_t key) {

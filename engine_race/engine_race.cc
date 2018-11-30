@@ -469,7 +469,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   auto idx = di.key >> 56;
   di.set_file_no(m_thread_id, idx);
   di.file_offset = data_fd.offset[idx];
-  if (write(data_fd.fds[idx], value.ToString().c_str(), kPageSize) != kPageSize) {
+  if (write(data_fd.fds[idx], value.data(), kPageSize) != kPageSize) {
     return kIOError;
   }
   // begin to write the index.
