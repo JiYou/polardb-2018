@@ -7,9 +7,10 @@
 
 namespace polar_race {
 
-template <typename T> class SPSCQueue {
+template <typename T>
+class spsc_queue {
 public:
-  explicit SPSCQueue(const size_t capacity)
+  explicit spsc_queue(const size_t capacity)
       : capacity_(capacity),
         slots_(capacity_ < 2 ? nullptr
                              : static_cast<T *>(operator new[](
@@ -18,13 +19,13 @@ public:
     if (capacity_ < 2) {
       throw std::invalid_argument("size < 2");
     }
-    assert(alignof(SPSCQueue<T>) >= kCacheLineSize);
+    assert(alignof(spsc_queue<T>) >= kCacheLineSize);
     assert(reinterpret_cast<char *>(&tail_) -
                reinterpret_cast<char *>(&head_) >=
            static_cast<ssize_t>(kCacheLineSize));
   }
 
-  ~SPSCQueue() {
+  ~spsc_queue() {
     while (front()) {
       pop();
     }
@@ -32,8 +33,8 @@ public:
   }
 
   // non-copyable and non-movable
-  SPSCQueue(const SPSCQueue &) = delete;
-  SPSCQueue &operator=(const SPSCQueue &) = delete;
+  spsc_queue(const spsc_queue &) = delete;
+  spsc_queue &operator=(const spsc_queue &) = delete;
 
   template <typename... Args>
   void emplace(Args &&... args) noexcept(
