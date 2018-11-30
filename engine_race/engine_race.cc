@@ -532,130 +532,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   return kSucc;
 }
 
-void EngineRace::ReadIndexEntry() {
-  // open index file.
-  int index_fd = open(AllIndexFile(), O_RDONLY | O_NONBLOCK | O_NOATIME | O_DIRECT, 0644);
-  auto flen = get_file_length(AllIndexFile());
-  int read_pos = 0;
-  index_buf_ = GetAlignedBuffer(k256MB);
-  while (true) {
-    int bytes = 0;
-    is_ok_to_read_index();
-    // if read to the end.
-    // seek back to the header.
-    if (read_pos == flen) {
-      lseek(index_fd, 0, SEEK_SET);
-    }
-    bytes = read_file(index_fd, index_buf_, k256MB);
-    read_pos += bytes;
-    buf_size_ = bytes;
-    ask_to_visit_index();
-  }
-}
-
-void EngineRace::ReadDataEntry() {
-  total_cache_ = GetAlignedBuffer(k256MB*5);
-  int next_op_file_no = 1;
-  const std::string data_path = file_name_ + kDataDirName;
-  char path[64];
-  while (true) {
-    char *head = total_cache_;
-    uint64_t max_size = k256MB * 5;
-    is_ok_to_read_data();
-    if (next_op_file_no == kThreadShardNumber) {
-      next_op_file_no = 1;
-    }
-    for (int i = 0; i < kMaxThreadNumber; i++) {
-      sprintf(path, "%s/%d/%d", data_path.c_str(), i, next_op_file_no);
-      int fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT | O_NONBLOCK, 0644);
-      data_buf_[i] = head;
-      auto bytes = read_file(fd, data_buf_[i], max_size);
-      close(fd);
-      head += bytes;
-      max_size -= bytes;
-    }
-    ask_to_visit_data();
-  }
-}
-
-RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Visitor &visitor) {
-  static std::once_flag init_range;
-  std::call_once (init_range, [this] {
-    // do not wait for multi-input.
-    if (stage_ == kReadStage) {
-      // save it to all file.
-      hash_.Save(AllIndexFile());
-    } else {
-      // start index-cache thread
-      DEBUG << "start the thread for index\n";
-      std::thread thd_index_cache(&EngineRace::ReadIndexEntry, this);
-      thd_index_cache.detach();
-      // start data-cache thread.
-      DEBUG << "start the thread for data\n";
-      std::thread thd_index_data(&EngineRace::ReadDataEntry, this);
-      thd_index_data.detach();
-    }
-  });
-
-//  if (stage_ == kReadStage) {
-//    return SlowRead(lower, upper, visitor);
-//  }
-
-  static thread_local uint64_t m_thread_id = 0xffff;
-  if (m_thread_id == 0xffff) {
-    auto thread_pid = pthread_self();
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    m_thread_id = thread_id_++;
-    CPU_SET(m_thread_id % max_cpu_cnt_, &cpuset);
-    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
-    if (rc != 0) {
-      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
-    }
-  }
-
-  // here must deal with 64 threads.
-  // When comes to here, ask the cache-thread to read cache.
-
-  int open_file_no = -1;
-  while (true) {
-    ask_to_read_index();
-    is_ok_to_visit_index();
-
-    // use 0 size to exit.
-    if (!buf_size_) {
-      break;
-    }
-
-    // scan every item.
-    struct disk_index *di = (struct disk_index*) index_buf_;
-    const uint64_t total_item = buf_size_ / sizeof(struct disk_index);
-    for (uint64_t i = 0; i < total_item; i++) {
-      auto &ref = di[i];
-      uint32_t file_no = ref.file_no;
-      uint32_t file_offset = ref.file_offset;
-
-      int data_dir = file_no >> 16;
-      int sub_file_no = (file_no & 0xffff);
-      uint64_t k64 = toBack(ref.key);
-
-      if (open_file_no != sub_file_no) {
-        open_file_no = sub_file_no;
-        ask_to_read_data();
-        is_ok_to_visit_data();
-      }
-      char *pos = data_buf_[data_dir] + file_offset;
-      PolarString k((char*)(&k64), kMaxKeyLen);
-      PolarString v(pos, kPageSize);
-      k.set_change(); v.set_change();
-      std::cout << ".";
-      visitor.Visit(k, v);
-    }
-  }
-
-  return kSucc;
-}
-
 RetCode EngineRace::SlowRead(const PolarString &lower, const PolarString &upper, Visitor &visitor) {
   uint64_t start = toInt(lower);
   uint64_t end = toInt(upper);
@@ -735,6 +611,137 @@ RetCode EngineRace::SlowRead(const PolarString &lower, const PolarString &upper,
   free(all);
   return kSucc;
 }
+
+void EngineRace::ReadIndexEntry() {
+  // open index file.
+  int index_fd = open(AllIndexFile(), O_RDONLY | O_NONBLOCK | O_NOATIME | O_DIRECT, 0644);
+  auto flen = get_file_length(AllIndexFile());
+  int read_pos = 0;
+  index_buf_ = GetAlignedBuffer(k256MB);
+  while (true) {
+    int bytes = 0;
+    is_ok_to_read_index();
+    // if read to the end.
+    // seek back to the header.
+    if (read_pos == flen) {
+      lseek(index_fd, 0, SEEK_SET);
+    }
+    bytes = read_file(index_fd, index_buf_, k256MB);
+    read_pos += bytes;
+    buf_size_ = bytes;
+    ask_to_visit_index();
+  }
+}
+
+void EngineRace::ReadDataEntry() {
+  total_cache_ = GetAlignedBuffer(k256MB*5);
+  int next_op_file_no = 1;
+  const std::string data_path = file_name_ + kDataDirName;
+  char path[64];
+  while (true) {
+    char *head = total_cache_;
+    uint64_t max_size = k256MB * 5;
+    is_ok_to_read_data();
+    if (next_op_file_no == kThreadShardNumber) {
+      next_op_file_no = 1;
+    }
+    for (int i = 0; i < kMaxThreadNumber; i++) {
+      sprintf(path, "%s/%d/%d", data_path.c_str(), i, next_op_file_no);
+      int fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT | O_NONBLOCK, 0644);
+      data_buf_[i] = head;
+      auto bytes = read_file(fd, data_buf_[i], max_size);
+      close(fd);
+      head += bytes;
+      max_size -= bytes;
+    }
+    ask_to_visit_data();
+  }
+}
+
+RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Visitor &visitor) {
+  static std::once_flag init_range;
+  std::cout << "stage_ = " << stage_ << std::endl;
+  std::call_once (init_range, [this] {
+    thread_id_ = 0;
+    // do not wait for multi-input.
+    if (stage_ == kReadStage) {
+      // save it to all file.
+      hash_.Save(AllIndexFile());
+//    } else {
+      // start index-cache thread
+      DEBUG << "start the thread for index\n";
+      std::thread thd_index_cache(&EngineRace::ReadIndexEntry, this);
+      thd_index_cache.detach();
+      // start data-cache thread.
+      DEBUG << "start the thread for data\n";
+      std::thread thd_index_data(&EngineRace::ReadDataEntry, this);
+      thd_index_data.detach();
+    }
+  });
+
+//  if (stage_ == kReadStage) {
+//    return SlowRead(lower, upper, visitor);
+//  }
+
+  static thread_local uint64_t m_thread_id = 0xffff;
+  if (m_thread_id == 0xffff) {
+    auto thread_pid = pthread_self();
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    m_thread_id = thread_id_++;
+    CPU_SET(m_thread_id % max_cpu_cnt_, &cpuset);
+    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    }
+    std::cout << "mid. " << m_thread_id << std::endl;
+  }
+
+  // here must deal with 64 threads.
+  // When comes to here, ask the cache-thread to read cache.
+
+  int open_file_no = -1;
+  while (true) {
+    // std::cout << "1. " << m_thread_id << std::endl;
+    ask_to_read_index(m_thread_id);
+    // std::cout << "2. " << m_thread_id << std::endl;
+    is_ok_to_visit_index(m_thread_id);
+    // std::cout << "3. " << m_thread_id << std::endl;
+
+    // use 0 size to exit.
+    if (!buf_size_) {
+      break;
+    }
+
+    // scan every item.
+    struct disk_index *di = (struct disk_index*) index_buf_;
+    const uint64_t total_item = buf_size_ / sizeof(struct disk_index);
+    for (uint64_t i = 0; i < total_item; i++) {
+      auto &ref = di[i];
+      uint32_t file_no = ref.file_no;
+      uint32_t file_offset = ref.file_offset;
+
+      int data_dir = file_no >> 16;
+      int sub_file_no = (file_no & 0xffff);
+      uint64_t k64 = toBack(ref.key);
+
+      if (open_file_no != sub_file_no) {
+        open_file_no = sub_file_no;
+        ask_to_read_data(m_thread_id);
+        is_ok_to_visit_data(m_thread_id);
+      }
+      char *pos = data_buf_[data_dir] + file_offset;
+      PolarString k((char*)(&k64), kMaxKeyLen);
+      PolarString v(pos, kPageSize);
+      k.set_change(); v.set_change();
+      visitor.Visit(k, v);
+    }
+  }
+
+  return kSucc;
+}
+
+
 
 }  // namespace polar_race
 

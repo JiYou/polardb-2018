@@ -19,16 +19,14 @@ int main(void) {
 
   std::atomic<bool> flag{false};
 
-  std::thread thd_push([&q, &flag] {
-    while (!flag);
+  std::thread thd_push([&q] {
     for (int i = 0; i < size; i++) {
       q.push(i);
     }
   });
 
   unsigned long long sum = 0;
-  flag = true;
-  std::thread thd_pop([&q, &sum, &flag] {
+  std::thread thd_pop([&q, &sum] {
     for (int i = 0; i < size; i++) {
       while (!q.front());
       auto ret = *q.front();

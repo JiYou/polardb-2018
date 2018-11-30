@@ -10,7 +10,7 @@ namespace polar_race {
 template <typename T>
 class spsc_queue {
 public:
-  explicit spsc_queue(const size_t capacity=8)
+  explicit spsc_queue(const size_t capacity=4)
       : capacity_(capacity),
         slots_(capacity_ < 2 ? nullptr
                              : static_cast<T *>(operator new[](

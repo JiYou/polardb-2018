@@ -147,7 +147,7 @@ void write(Engine* engine, threadsafe_vector<std::string>& keys, unsigned numWri
 void randomRead(Engine* engine, const threadsafe_vector<std::string>& keys, unsigned numRead)
 {
     RandNum_generator rng(0, keys.size() - 1);
-    for (unsigned i = 0; i < numRead; ++i) {
+    for (unsigned i = 0; i < 2; ++i) {
         auto& key = keys[rng.nextNum()];
         std::string val;
         engine->Read(key, &val);
