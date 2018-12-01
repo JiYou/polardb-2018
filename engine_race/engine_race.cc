@@ -638,27 +638,35 @@ void EngineRace::ReadIndexEntry() {
 }
 
 void EngineRace::ReadDataEntry() {
+  int data_fd[kMaxThreadNumber] = {-1};
+  aio_env_range<kMaxThreadNumber> read_aio;
   total_cache_ = GetAlignedBuffer(k256MB*5);
   int next_op_file_no = 0;
   const std::string data_path = file_name_ + kDataDirName;
   char path[64];
   while (true) {
     char *head = total_cache_;
-    uint64_t max_size = k256MB * 5;
     is_ok_to_read_data();
     next_op_file_no = (next_op_file_no + 1) % (kThreadShardNumber + 1);
     if (!next_op_file_no) {
       next_op_file_no = 1;
     }
+    read_aio.Clear();
     for (int i = 0; i < kMaxThreadNumber; i++) {
       sprintf(path, "%s/%d/%d", data_path.c_str(), i, next_op_file_no);
-      int fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT | O_NONBLOCK, 0644);
+      auto flen = get_file_length(path);
+
+      data_fd[i] = open(path, O_RDONLY | O_NOATIME | O_DIRECT, 0644);
       data_buf_[i] = head;
-      auto bytes = read_file(fd, data_buf_[i], max_size);
-      close(fd);
-      head += bytes;
-      max_size -= bytes;
+      read_aio.PrepareRead(data_fd[i], 0, data_buf_[i], flen);
+      head += flen;
     }
+    read_aio.Submit();
+    read_aio.WaitOver();
+    for (int i = 0; i < kMaxThreadNumber; i++) {
+      close(data_fd[i]);
+    }
+
     ask_to_visit_data();
   }
 }
