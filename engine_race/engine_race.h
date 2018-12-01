@@ -419,68 +419,60 @@ class EngineRace : public Engine  {
   char *data_buf_[kMaxThreadNumber] = {nullptr};
   char *total_cache_ = nullptr;
 
-  spsc_queue<bool> index_chan_[kMaxThreadNumber];
+  chan index_chan_[kMaxThreadNumber];
   // 64 visit thread -> ReadIndex thread
   // ask it to read index.
   void ask_to_read_index(int thread_id) {
-    index_chan_[thread_id].push(true);
+    index_chan_[thread_id].write();
   }
   // called by ReadIndex thread
   // if 64 threads as me to read, then read.
   void is_ok_to_read_index() {
     for (uint64_t i = 0; i < kMaxThreadNumber; i++) {
       auto &q = index_chan_[i];
-      while (!q.front())
-        ;
-      q.pop();
+      q.read();
     }
   }
 
-  spsc_queue<bool> data_chan_[kMaxThreadNumber];
+  chan data_chan_[kMaxThreadNumber];
   void ask_to_read_data(int thread_id) {
-    data_chan_[thread_id].push(true);
+    data_chan_[thread_id].write();
   }
   void is_ok_to_read_data() {
     for (uint64_t i = 0; i < kMaxThreadNumber; i++) {
       auto &q = data_chan_[i];
-      while (!q.front())
-        ;
-      q.pop();
+      q.read();
     }
   }
 
   // read-index thread -> 64 visit-thread
   // you can visit key now.
-  spsc_queue<bool> visit_index_chan_[kMaxThreadNumber];
+  chan visit_index_chan_[kMaxThreadNumber];
   void ask_to_visit_index() {
     for (uint64_t i = 0; i < kMaxThreadNumber; i++) {
       auto &q = visit_index_chan_[i];
-      q.push(true);
+      q.write();
     }
   }
   // 64 visit-thread -> read-index thread
   // is ok to visit the index?
   void is_ok_to_visit_index(int thread_id) {
-    while (!visit_index_chan_[thread_id].front())
-      ;
-    visit_index_chan_[thread_id].pop();
+    visit_index_chan_[thread_id].read();
   }
 
   // read-data thread -> 64 visit-thread
   // you can visit key now.
-  spsc_queue<bool> visit_data_chan_[kMaxThreadNumber];
+  chan visit_data_chan_[kMaxThreadNumber];
   void ask_to_visit_data() {
     for (uint64_t i = 0; i < kMaxThreadNumber; i++) {
       auto &q = visit_data_chan_[i];
-      q.push(true);
+      q.write();
     }
   }
   // 64 visit-thread -> read-data thread
   // is ok to visit the data?
   void is_ok_to_visit_data(int thread_id) {
-    while (!visit_data_chan_[thread_id].front())
-      ;
-    visit_data_chan_[thread_id].pop();
+    visit_data_chan_[thread_id].read();
   }
 
  private:

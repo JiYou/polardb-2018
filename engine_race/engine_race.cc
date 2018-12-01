@@ -669,6 +669,12 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
       hash_.Save(AllIndexFile());
 //    } else {
       // start index-cache thread
+      for (uint64_t i = 0; i < kMaxThreadNumber; i++) {
+        index_chan_[i].init();
+        data_chan_[i].init();
+        visit_index_chan_[i].init();
+        visit_data_chan_[i].init();
+      }
       DEBUG << "start the thread for index\n";
       std::thread thd_index_cache(&EngineRace::ReadIndexEntry, this);
       thd_index_cache.detach();
