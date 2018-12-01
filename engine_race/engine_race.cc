@@ -617,7 +617,7 @@ void EngineRace::ReadIndexEntry() {
   int index_fd = open(AllIndexFile(), O_RDONLY | O_NONBLOCK | O_NOATIME | O_DIRECT, 0644);
   auto flen = get_file_length(AllIndexFile());
   int read_pos = 0;
-  index_buf_ = GetAlignedBuffer(k256MB);
+  index_buf_ = GetAlignedBuffer(k256MB << 1);
   while (true) {
     int bytes = 0;
     is_ok_to_read_index();
@@ -630,7 +630,7 @@ void EngineRace::ReadIndexEntry() {
       ask_to_visit_index();
       continue;
     }
-    bytes = read_file(index_fd, index_buf_, k256MB);
+    bytes = read_file(index_fd, index_buf_, k256MB << 1);
     read_pos += bytes;
     buf_size_ = bytes;
     ask_to_visit_index();
