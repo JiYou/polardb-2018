@@ -30,13 +30,19 @@ namespace polar_race {
 class chan {
  public:
   void write() {
+    if (-1 == fd[1]) {
+      return;
+    }
     if (::write(fd[1], &c, sizeof(c)) != sizeof(c)) {
-      std::cout << "write fd[0] meet error\n";
+      ; // add error msg ?
     }
   }
   void read() {
+    if (-1 == fd[0]) {
+      return;
+    }
     if (::read(fd[0], &c, sizeof(c)) != sizeof(c)) {
-      std::cout << "read fd[1] meet error\n";
+      ; // add error msg?
     }
   }
   chan() { }
@@ -52,6 +58,7 @@ class chan {
     if (fd[1] > 0) {
       close(fd[1]);
     }
+    fd[0] = fd[1] = -1;
   }
  private:
   int c = 'A';

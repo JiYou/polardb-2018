@@ -625,6 +625,10 @@ void EngineRace::ReadIndexEntry() {
     // seek back to the header.
     if (read_pos == flen) {
       lseek(index_fd, 0, SEEK_SET);
+      read_pos = 0;
+      buf_size_ = 0;
+      ask_to_visit_index();
+      continue;
     }
     bytes = read_file(index_fd, index_buf_, k256MB);
     read_pos += bytes;
@@ -635,14 +639,15 @@ void EngineRace::ReadIndexEntry() {
 
 void EngineRace::ReadDataEntry() {
   total_cache_ = GetAlignedBuffer(k256MB*5);
-  int next_op_file_no = 1;
+  int next_op_file_no = 0;
   const std::string data_path = file_name_ + kDataDirName;
   char path[64];
   while (true) {
     char *head = total_cache_;
     uint64_t max_size = k256MB * 5;
     is_ok_to_read_data();
-    if (next_op_file_no == kThreadShardNumber) {
+    next_op_file_no = (next_op_file_no + 1) % (kThreadShardNumber + 1);
+    if (!next_op_file_no) {
       next_op_file_no = 1;
     }
     for (int i = 0; i < kMaxThreadNumber; i++) {
@@ -660,14 +665,13 @@ void EngineRace::ReadDataEntry() {
 
 RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Visitor &visitor) {
   static std::once_flag init_range;
-  std::cout << "stage_ = " << stage_ << std::endl;
   std::call_once (init_range, [this] {
     thread_id_ = 0;
     // do not wait for multi-input.
     if (stage_ == kReadStage) {
       // save it to all file.
       hash_.Save(AllIndexFile());
-//    } else {
+    } else {
       // start index-cache thread
       for (uint64_t i = 0; i < kMaxThreadNumber; i++) {
         index_chan_[i].init();
@@ -685,9 +689,10 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
     }
   });
 
-//  if (stage_ == kReadStage) {
-//    return SlowRead(lower, upper, visitor);
-//  }
+  // if has read before, use the old index cache.
+  if (stage_ == kReadStage) {
+    return SlowRead(lower, upper, visitor);
+  }
 
   static thread_local uint64_t m_thread_id = 0xffff;
   if (m_thread_id == 0xffff) {
@@ -700,25 +705,18 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
     if (rc != 0) {
       std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
     }
-    std::cout << "mid. " << m_thread_id << std::endl;
   }
 
   // here must deal with 64 threads.
   // When comes to here, ask the cache-thread to read cache.
-
   int open_file_no = -1;
   while (true) {
-    // std::cout << "1. " << m_thread_id << std::endl;
     ask_to_read_index(m_thread_id);
-    // std::cout << "2. " << m_thread_id << std::endl;
     is_ok_to_visit_index(m_thread_id);
-    // std::cout << "3. " << m_thread_id << std::endl;
 
-    // use 0 size to exit.
     if (!buf_size_) {
       break;
     }
-
     // scan every item.
     struct disk_index *di = (struct disk_index*) index_buf_;
     const uint64_t total_item = buf_size_ / sizeof(struct disk_index);
@@ -746,7 +744,6 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
 
   return kSucc;
 }
-
 
 
 }  // namespace polar_race

@@ -171,10 +171,13 @@ public:
     void Visit(const PolarString& key, const PolarString& value)
     {
         if (key != key_from_value(value.ToString())) {
+            auto thread_pid = pthread_self();
+            std::cout << "thread_pid = " << thread_pid << std::endl;
             std::cout << "Sequential Read error: key and value not match" << std::endl;
             exit(-1);
         }
         if (key != mKeys[mStart + mCnt]) {
+            auto thread_pid = pthread_self();
             std::cout << "Sequential Read error: not an expected key" << std::endl;
             exit(-1);
         }
