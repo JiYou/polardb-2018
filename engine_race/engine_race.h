@@ -393,6 +393,7 @@ class EngineRace : public Engine  {
  // - read_index thread.
  // - read_data thread
  private:
+
   void ReadIndexEntry();
   void ReadDataEntry();
 

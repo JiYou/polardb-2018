@@ -638,37 +638,62 @@ void EngineRace::ReadIndexEntry() {
 }
 
 void EngineRace::ReadDataEntry() {
-  int data_fd[kMaxThreadNumber] = {-1};
-  aio_env_range<kMaxThreadNumber> read_aio;
-  constexpr uint64_t cache_size = 2097152000ull;
-  total_cache_ = GetAlignedBuffer(cache_size);
-  int next_op_file_no = 0;
-  const std::string data_path = file_name_ + kDataDirName;
+  struct file_info {
+    int fd = -1;
+    int flen = 0;
+  };
+  file_info data_fd[kMaxThreadNumber][kThreadShardNumber];
+
+  std::string data_path = file_name_ + kDataDirName;
   char path[64];
-  while (true) {
-    char *head = total_cache_;
-    is_ok_to_read_data();
-    next_op_file_no = (next_op_file_no + 1) % (kThreadShardNumber + 1);
-    if (!next_op_file_no) {
-      next_op_file_no = 1;
+  for (int i = 0; i < kMaxThreadNumber; i++) {
+    for (int j = 0; j < (int)kThreadShardNumber; j++) {
+      sprintf(path, "%s/%d/%d", data_path.c_str(), i, j+1);
+      data_fd[i][j].fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT, 0644);
+      data_fd[i][j].flen = get_file_length(path);
     }
+  }
+
+  aio_env_range<kMaxThreadNumber> read_aio;
+  constexpr uint64_t cache_size = 1048576000ull;
+  char *current_buf = GetAlignedBuffer(cache_size);
+  char *next_buf = GetAlignedBuffer(cache_size);
+  char *next_data_buf[kMaxThreadNumber] = {nullptr};
+
+  if (!current_buf || !next_buf) {
+    DEBUG << "alloc memory for data buf failed\n";
+    return;
+  }
+
+  // init:
+  // read data into next.
+  // firstly, read the shard 1.
+  auto read_next_buf = [&](int file_no) {
+    char *head = next_buf;
     read_aio.Clear();
     for (int i = 0; i < kMaxThreadNumber; i++) {
-      sprintf(path, "%s/%d/%d", data_path.c_str(), i, next_op_file_no);
-      auto flen = get_file_length(path);
-
-      data_fd[i] = open(path, O_RDONLY | O_NOATIME | O_DIRECT, 0644);
-      data_buf_[i] = head;
-      read_aio.PrepareRead(data_fd[i], 0, data_buf_[i], flen);
+      int fd = data_fd[i][file_no].fd;
+      int flen = data_fd[i][file_no].flen;
+      next_data_buf[i] = head;
+      read_aio.PrepareRead(fd, 0,next_data_buf[i], flen);
       head += flen;
     }
     read_aio.Submit();
-    read_aio.WaitOver();
-    for (int i = 0; i < kMaxThreadNumber; i++) {
-      close(data_fd[i]);
-    }
+  };
 
+  read_next_buf(0);
+
+  int next_op_file_no = -1;
+  while (true) {
+    is_ok_to_read_data();
+    next_op_file_no = (next_op_file_no + 1) % kThreadShardNumber;
+    read_aio.WaitOver();
+    std::swap(next_buf, current_buf);
+    for (int i = 0; i < kMaxThreadNumber; i++) {
+      data_buf_[i] = next_data_buf[i];
+    }
     ask_to_visit_data();
+    read_next_buf(next_op_file_no);
   }
 }
 
@@ -688,9 +713,11 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
         visit_index_chan_[i].init();
         visit_data_chan_[i].init();
       }
+
       DEBUG << "start the thread for index\n";
       std::thread thd_index_cache(&EngineRace::ReadIndexEntry, this);
       thd_index_cache.detach();
+
       // start data-cache thread.
       DEBUG << "start the thread for data\n";
       std::thread thd_index_data(&EngineRace::ReadDataEntry, this);
