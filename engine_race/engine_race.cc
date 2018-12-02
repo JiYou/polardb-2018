@@ -617,7 +617,7 @@ void EngineRace::ReadIndexEntry() {
   int index_fd = open(AllIndexFile(), O_RDONLY | O_NONBLOCK | O_NOATIME | O_DIRECT, 0644);
   auto flen = get_file_length(AllIndexFile());
   int read_pos = 0;
-  index_buf_ = GetAlignedBuffer(k256MB << 1);
+  index_buf_ = GetAlignedBuffer(k16MB);
   while (true) {
     int bytes = 0;
     is_ok_to_read_index();
@@ -630,7 +630,7 @@ void EngineRace::ReadIndexEntry() {
       ask_to_visit_index();
       continue;
     }
-    bytes = read_file(index_fd, index_buf_, k256MB << 1);
+    bytes = read_file(index_fd, index_buf_, k16MB);
     read_pos += bytes;
     buf_size_ = bytes;
     ask_to_visit_index();
@@ -640,7 +640,8 @@ void EngineRace::ReadIndexEntry() {
 void EngineRace::ReadDataEntry() {
   int data_fd[kMaxThreadNumber] = {-1};
   aio_env_range<kMaxThreadNumber> read_aio;
-  total_cache_ = GetAlignedBuffer(k256MB*5);
+  constexpr uint64_t cache_size = 2097152000ull;
+  total_cache_ = GetAlignedBuffer(cache_size);
   int next_op_file_no = 0;
   const std::string data_path = file_name_ + kDataDirName;
   char path[64];
@@ -718,6 +719,9 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
   // here must deal with 64 threads.
   // When comes to here, ask the cache-thread to read cache.
   int open_file_no = -1;
+  PolarString k, v;
+  k.set_change(); v.set_change();
+
   while (true) {
     ask_to_read_index(m_thread_id);
     is_ok_to_visit_index(m_thread_id);
@@ -743,9 +747,8 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
         is_ok_to_visit_data(m_thread_id);
       }
       char *pos = data_buf_[data_dir] + file_offset;
-      PolarString k((char*)(&k64), kMaxKeyLen);
-      PolarString v(pos, kPageSize);
-      k.set_change(); v.set_change();
+      k.init((char*)(&k64), kMaxKeyLen);
+      v.init(pos, kPageSize);
       visitor.Visit(k, v);
     }
   }

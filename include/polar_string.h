@@ -63,6 +63,16 @@ class PolarString {
 
   void set_change() {
     set_change_ = true;
+    // record old addr and size
+    char **c_s_addr = (char**)(&str_);
+    uint64_t *c_s_len = (uint64_t*)(&str_) + 1;
+    old_str_len_ = *c_s_len;
+    old_str_addr_ = *c_s_addr;
+  }
+
+  void init(char *str, size_t s) {
+    data_ = str;
+    size_ = s;
   }
 
  private:
@@ -78,6 +88,9 @@ class PolarString {
 };
 
 inline bool operator==(const PolarString& x, const PolarString& y) {
+  if (x.size()== 8 && y.size() == 8) {
+    return *(const uint64_t*)x.data() == *(const uint64_t*)y.data();
+  }
   return ((x.size() == y.size()) &&
           (memcmp(x.data(), y.data(), x.size()) == 0));
 }
@@ -94,8 +107,6 @@ inline const std::string &PolarString::ToString() const {
   // record old addr and size
   char **c_s_addr = (char**)(&str_);
   uint64_t *c_s_len = (uint64_t*)(&str_) + 1;
-  old_str_len_ = *c_s_len;
-  old_str_addr_ = *c_s_addr;
   //std::string result;
   //result.assign(data_, size_);
   //return result;
