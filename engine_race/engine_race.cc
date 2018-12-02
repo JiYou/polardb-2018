@@ -642,7 +642,7 @@ void EngineRace::ReadDataEntry() {
     int fd = -1;
     int flen = 0;
   };
-  file_info data_fd[kMaxThreadNumber][kThreadShardNumber];
+  struct file_info data_fd[kMaxThreadNumber][kThreadShardNumber];
 
   std::string data_path = file_name_ + kDataDirName;
   char path[64];
@@ -675,7 +675,7 @@ void EngineRace::ReadDataEntry() {
       int fd = data_fd[i][file_no].fd;
       int flen = data_fd[i][file_no].flen;
       next_data_buf[i] = head;
-      read_aio.PrepareRead(fd, 0,next_data_buf[i], flen);
+      read_aio.PrepareRead(fd, 0, next_data_buf[i], flen);
       head += flen;
     }
     read_aio.Submit();
@@ -683,16 +683,16 @@ void EngineRace::ReadDataEntry() {
 
   read_next_buf(0);
 
-  int next_op_file_no = -1;
+  int next_op_file_no = 0;
   while (true) {
     is_ok_to_read_data();
-    next_op_file_no = (next_op_file_no + 1) % kThreadShardNumber;
     read_aio.WaitOver();
     std::swap(next_buf, current_buf);
     for (int i = 0; i < kMaxThreadNumber; i++) {
       data_buf_[i] = next_data_buf[i];
     }
     ask_to_visit_data();
+    next_op_file_no = (next_op_file_no + 1) % kThreadShardNumber;
     read_next_buf(next_op_file_no);
   }
 }
