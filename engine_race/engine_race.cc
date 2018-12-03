@@ -121,7 +121,7 @@ void HashTreeTable::Sort() {
   };
 
   std::vector<std::thread> thread_list;
-  constexpr int segment_size = 104355;
+  constexpr int segment_size = kMaxBucketSize / kMaxThreadNumber + 2;
   for (int i = 0; i < kMaxThreadNumber; i++) {
     const size_t begin = i * segment_size;
     const size_t end = (i + 1) * segment_size;
@@ -408,6 +408,13 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, 0/*index_id*/);
     index_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK | O_NOATIME , 0644);
     posix_fallocate(index_fw.fd, 0, kMaxIndexFileSize);
+
+    // setup the journal file.
+    // to speed up the write process.
+    // every journal file would be.
+    // 4K = 512 key * 64bits.
+    // 24689664 / (4096.0+8.0)
+    // = 6016.0
   }
 
   // because there just 256 shards.
