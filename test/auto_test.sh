@@ -5,7 +5,7 @@ cd ..
 make clean
 make
 cd ./test
-make clean
+rm -rf ./office_test
 make
 rm -rf /tmp/test_*
 echo 3 > /proc/sys/vm/drop_caches

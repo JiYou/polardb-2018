@@ -39,7 +39,8 @@ static const char kBigFileName[] = "DB";
 
 uint32_t HashTreeTable::compute_pos(uint64_t x) {
   // hash tree algorithm
-  return (((((x % 17) * 19 + x % 19) * 23 + x % 23) * 29 + x % 29) * 31 + x % 31);
+  //return (((((x % 17) * 19 + x % 19) * 23 + x % 23) * 29 + x % 29) * 31 + x % 31);
+  return x >> 41;
 }
 
 RetCode HashTreeTable::find(std::vector<struct disk_index> &vs,
@@ -86,13 +87,19 @@ RetCode HashTreeTable::SetNoLock(const char *key, uint32_t file_no, uint32_t fil
 
   auto &vs = hash_[array_pos];
   struct disk_index *ptr = nullptr;
-  auto ret = find(vs, *k, &ptr);
+  // auto ret = find(vs, *k, &ptr);
+  auto ret = kNotFound;
+  for (auto &x: vs) {
+    if (x.key == *k) {
+      x.file_no = file_no;
+      x.file_offset = file_offset;
+      ret = kSucc;
+      break;
+    }
+  }
 
   if (ret == kNotFound) {
     vs.emplace_back(*k, file_no, file_offset);
-  } else {
-    ptr->file_no = file_no;
-    ptr->file_offset = file_offset;
   }
 
   if (ar) {
@@ -144,74 +151,12 @@ void HashTreeTable::Save(const char *file_name) {
     DEBUG << "open " << file_name << "failed\n";
     return;
   }
-
-  struct Node {
-    std::vector<struct disk_index>::iterator pos;
-    std::vector<struct disk_index>::iterator end;
-    // make small heap
-    bool operator < (const Node &n) const {
-      return pos->key > n.pos->key;
-    }
-  };
-
-  Node *heap = (Node*) malloc(sizeof(Node) * kMaxBucketSize);
-  int iter = 0;
-  if (!heap) {
-    DEBUG << "malloc memory for heap failed\n";
-    return;
-  }
-
   for (auto &vs: hash_) {
     if (!vs.empty()) {
-      heap[iter].pos = vs.begin();
-      heap[iter].end = vs.end();
-      iter++;
+      write(fd, vs.data(), vs.size() * sizeof(struct disk_index));
     }
   }
-  int tail = iter;
-  std::make_heap(heap, heap + tail);
-
-  // 256MB cache.
-  constexpr uint32_t buffer_size = 16777216ull;
-  constexpr uint32_t mem_size = buffer_size * sizeof(struct disk_index);
-  struct disk_index *write_buffer = (struct disk_index*) malloc(mem_size);
-  int idx = 0;
-
-  while (tail) {
-    // pop a item.
-    std::pop_heap(heap, heap + tail);
-    // get the last item.
-    auto &last = heap[--tail];
-    write_buffer[idx++] = *(last.pos);
-    // if the buffer is full, flush to file.
-    if (idx == buffer_size) {
-      if (write(fd, write_buffer, mem_size) != mem_size) {
-        DEBUG << "write index file meet error\n";
-        return;
-      }
-      idx = 0;
-    }
-
-    // find the item, then put it into heap.
-    last.pos++;
-    if (last.pos != last.end) {
-      tail++;
-      std::push_heap(heap, heap + tail);
-    }
-  }
-
-  // write the left item in the buffer.
-  if (idx) {
-    int write_size = sizeof(struct disk_index) * idx;
-    if (write(fd, write_buffer, write_size) != write_size) {
-      DEBUG << "write file index meet error\n";
-      return;
-    }
-  }
-
   close(fd);
-  free(write_buffer);
-  free(heap);
   DEBUG << "save all index to " << file_name << std::endl;
   END_POINT(end_save_index, begin_save_index, "save_all_time_ms");
 }
