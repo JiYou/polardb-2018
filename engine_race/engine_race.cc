@@ -151,11 +151,29 @@ void HashTreeTable::Save(const char *file_name) {
     DEBUG << "open " << file_name << "failed\n";
     return;
   }
+  char *write_buffer = GetAlignedBuffer(k16MB);
+  if (!write_buffer) {
+    DEBUG << "alloc memory for write_buffer failed\n";
+    return;
+  }
+  struct disk_index *di = (struct disk_index*) write_buffer;
+  int iter = 0;
+  const int total = k16MB / sizeof(struct disk_index);
   for (auto &vs: hash_) {
     if (!vs.empty()) {
-      write(fd, vs.data(), vs.size() * sizeof(struct disk_index));
+      for (auto &x: vs) {
+        if (iter == total) {
+          write(fd, write_buffer, k16MB);
+          iter = 0;
+        }
+        di[iter++] = x;
+      }
     }
   }
+  if (iter) {
+    write(fd, write_buffer, iter * sizeof(struct disk_index));
+  }
+  free(write_buffer);
   close(fd);
   DEBUG << "save all index to " << file_name << std::endl;
   END_POINT(end_save_index, begin_save_index, "save_all_time_ms");
