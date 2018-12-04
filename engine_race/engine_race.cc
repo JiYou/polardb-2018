@@ -86,11 +86,10 @@ RetCode HashTreeTable::SetNoLock(const char *key, uint32_t file_no, uint32_t fil
   }
 
   auto &vs = hash_[array_pos];
-  struct disk_index *ptr = nullptr;
   // auto ret = find(vs, *k, &ptr);
   auto ret = kNotFound;
   for (auto &x: vs) {
-    if (x.key == *k) {
+    if (static_cast<uint64_t>(x.key) == static_cast<const uint64_t>(*k)) {
       x.file_no = file_no;
       x.file_offset = file_offset;
       ret = kSucc;
@@ -163,7 +162,10 @@ void HashTreeTable::Save(const char *file_name) {
     if (!vs.empty()) {
       for (auto &x: vs) {
         if (iter == total) {
-          write(fd, write_buffer, k16MB);
+          if (write(fd, write_buffer, k16MB) != k16MB) {
+            DEBUG << "write file " << file_name << " meet error\n";
+            return;
+          }
           iter = 0;
         }
         di[iter++] = x;
@@ -348,15 +350,6 @@ EngineRace::~EngineRace() {
 
 
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
-  struct fd_wrapper {
-    int fd = -1;
-    ~fd_wrapper() {
-      if (-1 != fd) {
-        fdatasync(fd);
-        close(fd);
-      }
-    }
-  };
   // open 256 files.
   struct shard_wrapper {
     int *fds = nullptr;
@@ -399,10 +392,11 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
 
   static thread_local int m_thread_id = 0xffff;
   static thread_local char path[64];
-  static thread_local struct fd_wrapper index_fw;
-  static thread_local struct fd_wrapper data_fw;
+  static thread_local int index_fd = -1;
   static thread_local struct disk_index di;
   static thread_local struct shard_wrapper data_fd;
+  static thread_local struct disk_index *mptr = nullptr;
+  static thread_local int mptr_iter = 0;
 
   di.key = toInt(key);
   if (m_thread_id == 0xffff) {
@@ -424,15 +418,15 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     // TODO: this need to find out the last index of index file and data file.
     // in real project.
     sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, 0/*index_id*/);
-    index_fw.fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK | O_NOATIME , 0644);
-    posix_fallocate(index_fw.fd, 0, kMaxIndexFileSize);
+    index_fd = open(path, O_RDWR | O_CREAT | O_NOATIME | O_TRUNC, 0644);
+    posix_fallocate(index_fd, 0, kMaxIndexFileSize); // 24MB
 
-    // setup the journal file.
-    // to speed up the write process.
-    // every journal file would be.
-    // 4K = 512 key * 64bits.
-    // 24689664 / (4096.0+8.0)
-    // = 6016.0
+    auto ptr = mmap(NULL, kMaxIndexFileSize, PROT_READ|PROT_WRITE, MAP_SHARED | MAP_POPULATE, index_fd, 0);
+    if (ptr == MAP_FAILED) {
+      DEBUG << "map failed for index write\n";
+    }
+    mptr = reinterpret_cast<struct disk_index*>(ptr);
+    memset(mptr, 0, kMaxIndexFileSize); // 24MB
   }
 
   // because there just 256 shards.
@@ -442,10 +436,8 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   if (write(data_fd.fds[idx], value.data(), kPageSize) != kPageSize) {
     return kIOError;
   }
-  // begin to write the index.
-  if (write(index_fw.fd, &di, sizeof(struct disk_index)) != sizeof(struct disk_index)) {
-    return kIOError;
-  }
+  // pointer operate the ptr.
+  mptr[mptr_iter++] = di;
   data_fd.offset[idx] += kPageSize;
   return kSucc;
 }

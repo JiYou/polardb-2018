@@ -73,7 +73,7 @@ constexpr size_t kMaxQueueSize = 128; // 4K * 4Kitem ~= 16MB
 constexpr int kMaxThreadNumber = 64; // max number of thread.
 constexpr int kMaxIOEvent = 64;
 constexpr uint64_t kMaxDataFileSize = 16777216ull; // 16MB
-constexpr uint64_t kMaxIndexFileSize = 52428800ull; // 50MB
+constexpr uint64_t kMaxIndexFileSize = 25165824ull; // 24MB
 constexpr uint64_t kMaxFileNumber = 65536;
 constexpr uint64_t kPathLength = 64; // path length
 constexpr uint64_t kMaxKVItem = 64000000; // 64M
