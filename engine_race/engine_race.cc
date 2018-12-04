@@ -150,19 +150,20 @@ void HashTreeTable::Save(const char *file_name) {
     DEBUG << "open " << file_name << "failed\n";
     return;
   }
-  char *write_buffer = GetAlignedBuffer(k16MB);
+  constexpr uint64_t write_buffer_size = k256MB;
+  char *write_buffer = GetAlignedBuffer(write_buffer_size);
   if (!write_buffer) {
     DEBUG << "alloc memory for write_buffer failed\n";
     return;
   }
   struct disk_index *di = (struct disk_index*) write_buffer;
   int iter = 0;
-  const int total = k16MB / sizeof(struct disk_index);
+  const int total = write_buffer_size / sizeof(struct disk_index);
   for (auto &vs: hash_) {
     if (!vs.empty()) {
       for (auto &x: vs) {
         if (iter == total) {
-          if (write(fd, write_buffer, k16MB) != k16MB) {
+          if (write(fd, write_buffer, write_buffer_size) != write_buffer_size) {
             DEBUG << "write file " << file_name << " meet error\n";
             return;
           }
