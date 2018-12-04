@@ -37,56 +37,79 @@
 namespace polar_race {
 
 #pragma pack(push, 1)
-// totaly 16 bytes.
-struct disk_index {
-  uint64_t key = 0;
-  uint32_t file_no = 0;
-  uint32_t file_offset = 0;
-  disk_index(uint64_t k, uint32_t fn, uint32_t ff) :
-    key(k), file_no(fn), file_offset(ff) {
+// try to just use 256 files.
+// the file number is from [0, 256)
+// 0 is not included.
+// offset is devided by 4K
+// 1024*1024*1024/4096
+// 262144 need 18bits.
+// so, here need 24 bits.
+// 8 + 3 = 11 bytes.
+// 3bytes is hard to deal
+// so, here just use 12 bytes.
+class disk_index {
+ private:
+  uint64_t key_ = 0;
+  uint32_t offset_ = 0;
+ public:
+  disk_index(uint64_t k, uint32_t o) : key_(k), offset_(o) {
   }
 
   disk_index() { }
 
+  uint64_t get_key() const {
+    return key_;
+  }
+
+  uint32_t get_offset() const {
+    return offset_;
+  }
+
+  const uint64_t *get_key_ptr() const {
+    return &key_;
+  }
+
+  void set_key(uint64_t key) {
+    key_ = key;
+  }
+
+  void set_offset(uint64_t offset) {
+    offset_ = offset;
+  }
+
+  // NOTE: return value [0, 256);
+  uint16_t get_file_number() const {
+    return (key_ >> 56);
+  }
+
   bool operator < (const uint64_t k) const {
-    return key < k;
+    return key_ < k;
   }
 
   bool operator < (const disk_index &x) const {
-    return key < x.key;
+    return key_ < x.key_;
   }
 
   bool operator == (const disk_index &k) const {
-    return key == k.key && file_no == k.file_no && file_offset == file_offset;
+    return key_ == k.key_ &&
+      offset_ == k.offset_;
   }
 
-  bool operator != (const disk_index &k) {
-    return key != k.key || file_no != k.file_no || file_offset != file_offset;
+  bool operator != (const disk_index &k) const {
+    return key_ != k.key_ ||
+      offset_ != k.offset_;
   }
 
   bool is_valid() const {
-    return !(file_no == 0xffffffff && file_offset == 0xffffffff);
-  }
-
-  void set_file_no(int thread_id, int fn) {
-    file_no = (thread_id<<16) | fn;
-  }
-
-  int get_thrad_id() const {
-    return file_no >> 16;
-  }
-
-  int get_file_no() const {
-    return file_no & 0xffff;
+    return !(key_ == 0 && offset_ == 0);
   }
 };
 #pragma pack(pop)
 
 class HashTreeTable {
  public:
-  RetCode GetNoLock(const std::string &key, uint32_t *file_no, uint32_t *file_offset); // no_lock
-  RetCode GetNoLock(const char* key, uint32_t *file_no, uint32_t *file_offset); // no_lock
-  RetCode SetNoLock(const char* key, uint32_t file_no, uint32_t file_offset, spinlock *ar); // no_lock
+  RetCode GetNoLock(uint64_t key, uint32_t *file_no, uint32_t *file_offset); // no_lock
+  RetCode SetNoLock(uint64_t key, uint32_t file_offset, spinlock *ar); // no_lock
 
   // NOTE: no lock here. Do not call it anywhere.
   // after load all the entries from disk,
@@ -163,10 +186,10 @@ struct aio_env_single {
     iocb.u.c.buf = buf; // must set here !
   }
 
-  void Prepare16MB(uint64_t offset, char *out) {
+  void Prepare(uint64_t offset, char *out, uint64_t size) {
     iocb.u.c.offset = offset;
     iocb.u.c.buf = out;
-    iocb.u.c.nbytes = k16MB;
+    iocb.u.c.nbytes = size;
   }
 
   RetCode Submit() {
@@ -202,156 +225,6 @@ struct aio_env_single {
   struct timespec timeout;
 };
 
-template<typename KVItem>
-class Queue {
-  public:
-    Queue(size_t cap): cap_(cap) { }
-
-    // just push the pointer of write_item into queue.
-    // the address of write_item maybe local variable
-    // in the stack, so the caller must wait before
-    // it return from stack-function.
-    void Push(KVItem w) {
-      // check the queue is full or not.
-      std::unique_lock<std::mutex> l(qlock_);
-      // check full or not.
-      produce_.wait(l, [&] { return q_.size() != cap_; });
-      q_.push_back(w);
-      consume_.notify_all();
-    }
-
-    uint64_t Size() {
-      std::unique_lock<std::mutex> lck(qlock_);
-      return q_.size();
-    }
-
-    /*
-     * because the read is random, wait maybe not that effective.
-     * but for write, if more data flushed by one time.
-     * it maybe faster that flush 2 times.
-     * So, if find the items are smaller, wait for some nano seconds.
-     */
-    void Pop(std::vector<KVItem> *vs, bool is_write=true) {
-        if (is_write && !has_wait) {
-          for (int i = 0; i < 1024 && Size() < kMaxThreadNumber; i++) {
-            DEBUG << "i = " << i << "Q size = " << Size() << std::endl;
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-          }
-        }
-        std::unique_lock<std::mutex> lck(qlock_);
-        consume_.wait(lck, [&] {return !q_.empty(); });
-        vs->swap(q_);
-        q_.clear();
-        produce_.notify_all();
-    }
-
-  void SetNoWait() {
-    has_wait = true;
-  }
-  private:
-    bool has_wait = false;
-    std::vector<KVItem> q_;
-    std::mutex qlock_;
-    std::condition_variable produce_;
-    std::condition_variable consume_;
-    size_t cap_ = kMaxQueueSize;
-};
-
-template<int numberOfEvent>
-struct aio_env_range {
-  aio_env_range() {
-    // prepare the io context.
-    memset(&ctx, 0, sizeof(ctx));
-    if (io_setup(numberOfEvent, &ctx) < 0) {
-      DEBUG << "Error in io_setup" << std::endl;
-    }
-
-    timeout.tv_sec = 0;
-    timeout.tv_nsec = 0;
-
-    memset(&iocb, 0, sizeof(iocb));
-    iocbs = (struct iocb**) malloc(sizeof(struct iocb*) * numberOfEvent);
-    for (int i = 0; i < numberOfEvent; i++) {
-      iocbs[i] = iocb + i;
-      iocb[i].aio_lio_opcode = IO_CMD_PREAD;
-      iocb[i].aio_reqprio = 0;
-      iocb[i].u.c.nbytes = kPageSize;
-      // iocb->u.c.offset = offset;
-      // iocb->aio_fildes = fd;
-      // iocb->u.c.buf = buf;
-    }
-  }
-
-  void PrepareRead(int fd, uint64_t offset, char *out, uint32_t size) {
-    // prepare the io
-    iocb[index].aio_fildes = fd;
-    iocb[index].u.c.offset = offset;
-    iocb[index].u.c.buf = out;
-    iocb[index].u.c.nbytes = size;
-    iocb[index].aio_lio_opcode = IO_CMD_PREAD;
-    index++;
-  }
-
-  void PrepareWrite(int fd, uint64_t offset, char *out, uint32_t size) {
-    iocb[index].aio_fildes = fd;
-    iocb[index].u.c.offset = offset;
-    iocb[index].u.c.buf = out;
-    iocb[index].u.c.nbytes = size;
-    iocb[index].aio_lio_opcode = IO_CMD_PWRITE;
-    index++;
-  }
-
-  void Clear() {
-    index = 0;
-  }
-
-  int Size() const {
-    return index;
-  }
-
-  bool Full() {
-    return index == numberOfEvent;
-  }
-
-  RetCode Submit() {
-    if ((io_submit(ctx, index, iocbs)) != index) {
-      DEBUG << "io_submit meet error, " << std::endl;;
-      printf("io_submit error\n");
-      return kIOError;
-    }
-    return kSucc;
-  }
-
-  void WaitOver() {
-    int write_over_cnt = 0;
-    while (write_over_cnt != index) {
-      constexpr int min_number = 1;
-      int num_events = io_getevents(ctx, min_number, index, events, &timeout);
-      for (int i = 0; i < num_events; i++) {
-        wait_item *feed_back = reinterpret_cast<wait_item*>(events[i].data);
-        if (feed_back) {
-          feed_back->feed_back();
-        }
-      }
-      // need to call for (i = 0; i < num_events; i++) events[i].call_back();
-      write_over_cnt += num_events;
-    }
-  }
-
-  ~aio_env_range() {
-    io_destroy(ctx);
-  }
-
-  int fd = 0;
-  int index = 0;
-  io_context_t ctx;
-  struct iocb iocb[numberOfEvent];
-  // struct iocb* iocbs[numberOfEvent];
-  struct iocb** iocbs = nullptr;
-  struct io_event events[numberOfEvent];
-  struct timespec timeout;
-};
-
 class EngineRace : public Engine  {
  public:
   static RetCode Open(const std::string& name, Engine** eptr);
@@ -381,11 +254,99 @@ class EngineRace : public Engine  {
   void RangeEntry();
   RetCode SlowRead(const PolarString &l, const PolarString &u, Visitor &visitor);
 
+ private:
+  uint64_t pin_cpu() {
+    auto thread_pid = pthread_self();
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    uint64_t m_thread_id = thread_id_++;
+    CPU_SET(m_thread_id % max_cpu_cnt_, &cpuset);
+    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    }
+    return m_thread_id;
+  }
+ private:
+  // for write/read/range
+  bool has_open_data_fd_ = false;
+  int data_fd_[kThreadShardNumber] = {-1};
+  // in the write process the initial value is set to 0.
+  int data_fd_len_[kThreadShardNumber] = {0};
+  spinlock *write_lock_ = nullptr;
+  void close_data_fd() {
+    if (!has_open_data_fd_) {
+      return;
+    }
+    for (int i = 0; i < (int)kThreadShardNumber; i++) {
+      if (data_fd_[i] > 0) {
+        close(data_fd_[i]);
+        data_fd_[i] = -1;
+      }
+    }
+  }
+
+  void open_data_fd_read() {
+    if (has_open_data_fd_) {
+      close_data_fd();
+    }
+    char path[kPathLength];
+    const std::string data_dir = file_name_ + kDataDirName;
+    for (int i = 0; i < (int)kThreadShardNumber; i++) {
+      sprintf(path, "%s/%d", data_dir.c_str(), i);
+      int fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT, 0644);
+      if (fd < 0) {
+        DEBUG << "open " << path << " meet error\n";
+        // DO not exit, may this file not exits.
+      }
+      data_fd_[i] = fd;
+    }
+    has_open_data_fd_ = true;
+  }
+
+  void open_data_fd_range() {
+    if (has_open_data_fd_) {
+      close_data_fd();
+    }
+    char path[kPathLength];
+    const std::string data_dir = file_name_ + kDataDirName;
+    for (int i = 0; i < (int)kThreadShardNumber; i++) {
+      sprintf(path, "%s/%d", data_dir.c_str(), i);
+      data_fd_len_[i] = get_file_length(path);
+      int fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT, 0644);
+      if (fd < 0) {
+        DEBUG << "open " << path << " meet error\n";
+        // DO not exit, may this file not exits.
+      }
+      data_fd_[i] = fd;
+    }
+    has_open_data_fd_ = true;
+  }
+
+  void open_data_fd_write() {
+    char path[kPathLength];
+    const std::string data_dir = file_name_ + kDataDirName;
+    for (int i = 0; i < (int)kThreadShardNumber; i++) {
+      sprintf(path, "%s/%d", data_dir.c_str(), i);
+      int fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK | O_NOATIME, 0644);
+      if (fd < 0) {
+        DEBUG << "open " << path << " meet error\n";
+        // DO not exit, may this file not exits.
+      }
+      data_fd_[i] = fd;
+    }
+    posix_fallocate(data_fd_[0], 0, kPageSize);
+    lseek(data_fd_[0], 0, SEEK_END);
+    // change the start position.
+    data_fd_len_[0] = kPageSize;
+    has_open_data_fd_ = true;
+  }
+
  // Read Stage
  private:
   void init_read();
   HashTreeTable hash_; // for the read index.
-  std::vector<std::vector<int>> data_fds_; // for the data fd.
+
 
  // Range Stage
  // TODO here is just for 64 threads: call these threads visit-thread.
@@ -417,8 +378,7 @@ class EngineRace : public Engine  {
 
   uint64_t buf_size_ = 0;
   char *index_buf_ = nullptr;
-  char *data_buf_[kMaxThreadNumber] = {nullptr};
-  char *total_cache_ = nullptr;
+  char *data_buf_ = nullptr;
 
   chan index_chan_[kMaxThreadNumber];
   // 64 visit thread -> ReadIndex thread

@@ -1,4 +1,5 @@
 #include "include/engine.h"
+#include "engine_race/engine_race.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -22,27 +23,19 @@ static const char kDumpPath[] = "/tmp/test_dump";
 using namespace polar_race;
 
 int main(int argc, char **argv) {
-  struct disk_index {
-    uint64_t key;
-    uint32_t file_no;
-    uint32_t file_offset;
-  };
   int fd = open(argv[1], O_RDONLY, 0644);
   // read 16 bytes every time.
-  struct disk_index di;
-  int cnt = 0;
+  int cnt = -1;
   while (true) {
     ++cnt;
-    di.file_no = di.file_offset = 0;
-    if (read(fd, &di, 16) != 16) {
+    struct disk_index di;
+    if (read(fd, &di, sizeof(struct disk_index)) != sizeof(di)) {
       break;
     }
-
-    if (di.file_no == 0 && di.file_offset == 0 && di.key == 0) {
+    if (!di.is_valid()) {
       break;
     }
-    cnt++;
-    printf("%lux %d-%d %d\n", di.key, di.file_no >> 16, di.file_no & 0xffff, di.file_offset);
+    printf("%lu %d %d\n", di.get_key(), di.get_file_number(), di.get_offset());
   }
 
   std::cout << "read over: cnt = " << cnt << std::endl;

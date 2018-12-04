@@ -48,38 +48,32 @@ RetCode HashTreeTable::find(std::vector<struct disk_index> &vs,
                             struct disk_index**ptr) {
   auto pos = std::lower_bound(vs.begin(),
     vs.end(), key, [](const disk_index &a, uint64_t b) {
-    return a.key < b;
+    return a.get_key() < b;
   });
   // has find.
-  if (pos != vs.end() && !(key < pos->key)) {
+  if (pos != vs.end() && !(key < pos->get_key())) {
     *ptr = &(*pos);
     return kSucc;
   }
   return kNotFound;
 }
 
-RetCode HashTreeTable::GetNoLock(const char* key, uint32_t *file_no, uint32_t *file_offset) {
-  const uint64_t *k = reinterpret_cast<const uint64_t*>(key);
-  const uint64_t array_pos = compute_pos(*k);
+RetCode HashTreeTable::GetNoLock(uint64_t key, uint32_t *file_no, uint32_t *file_offset) {
+  const uint64_t array_pos = compute_pos(key);
   // then begin to search this array.
   auto &vs = hash_[array_pos];
   struct disk_index *ptr = nullptr;
-  auto ret = find(vs, *k, &ptr);
+  auto ret = find(vs, key, &ptr);
   if (ret == kNotFound) {
     return kNotFound;
   }
-  *file_no = ptr->file_no;
-  *file_offset = ptr->file_offset;
+  *file_no = ptr->get_file_number();
+  *file_offset = ptr->get_offset();
   return kSucc;
 }
 
-RetCode HashTreeTable::GetNoLock(const std::string &key, uint32_t *file_no, uint32_t *file_offset) {
-  return GetNoLock(key.c_str(),  file_no, file_offset);
-}
-
-RetCode HashTreeTable::SetNoLock(const char *key, uint32_t file_no, uint32_t file_offset, spinlock *ar) {
-  const int64_t *k = reinterpret_cast<const int64_t*>(key);
-  const uint64_t array_pos = compute_pos(*k);
+RetCode HashTreeTable::SetNoLock(uint64_t key, uint32_t file_offset, spinlock *ar) {
+  const uint64_t array_pos = compute_pos(key);
 
   if (ar) {
     ar[array_pos].lock();
@@ -89,16 +83,15 @@ RetCode HashTreeTable::SetNoLock(const char *key, uint32_t file_no, uint32_t fil
   // auto ret = find(vs, *k, &ptr);
   auto ret = kNotFound;
   for (auto &x: vs) {
-    if (static_cast<uint64_t>(x.key) == static_cast<const uint64_t>(*k)) {
-      x.file_no = file_no;
-      x.file_offset = file_offset;
+    if (static_cast<uint64_t>(x.get_key()) == key) {
+      x.set_offset(file_offset);
       ret = kSucc;
       break;
     }
   }
 
   if (ret == kNotFound) {
-    vs.emplace_back(*k, file_no, file_offset);
+    vs.emplace_back(key, file_offset);
   }
 
   if (ar) {
@@ -174,7 +167,11 @@ void HashTreeTable::Save(const char *file_name) {
     }
   }
   if (iter) {
-    write(fd, write_buffer, iter * sizeof(struct disk_index));
+    int write_size = iter * sizeof(struct disk_index);
+    if (write(fd, write_buffer, write_size) != write_size) {
+      DEBUG << "write file = " << file_name << " meet error\n";
+      exit(-1);
+    }
   }
   free(write_buffer);
   close(fd);
@@ -253,68 +250,34 @@ void EngineRace::init_read() {
     return;
   }
 
-  std::vector<std::string> idx_dirs(kMaxThreadNumber);
-
-  DEBUG << "begin to build the hash index.\n";
-  idx_dirs.clear();
-  if (0 != GetDirFiles(file_name_ + kMetaDirName, &idx_dirs)) {
-    DEBUG << "call GetDirFiles() failed: " << file_name_ + kMetaDirName << std::endl;
-  }
-
-  auto init_hash_per_thread = [&](const std::string &fn) {
+  // just read the index files.
+  // NOTE change the dir to test_engine/index/(0~~255)
+  const std::string index_dir = file_name_ + kMetaDirName;
+  auto init_hash_per_thread = [&](int thread_id) {
     // open the folder.
-    auto file_name = file_name_ + kMetaDirName + "/" + fn + "/0";
-    auto fd = open(file_name.c_str(), O_RDONLY | O_NOATIME, 0644);
+    char path[64];
+    sprintf(path, "%s/%d", index_dir.c_str(), thread_id);
+    auto fd = open(path, O_RDONLY | O_NOATIME, 0644);
     if (fd < 0) {
-      DEBUG << "open " << file_name << "failed\n";
+      /*is there is just single thread, open would failed*/;
+      return;
     }
     struct disk_index di;
     while (read(fd, &di, sizeof(disk_index)) == sizeof(struct disk_index)) {
-      if (di.key == 0 && di.file_no == 0 && di.file_offset == 0) {
+      if (!di.is_valid()) {
         break;
       }
-      const char *k = reinterpret_cast<const char*>(&(di.key));
-      hash_.SetNoLock(k, di.file_no, di.file_offset, shard_locks);
+      hash_.SetNoLock(di.get_key(), di.get_offset(), shard_locks);
     }
     close(fd);
   };
 
-  for (auto &idx_dir: idx_dirs) {
-    thread_list.emplace_back(std::thread(init_hash_per_thread, idx_dir));
+  for (int i = 0; i < (int)kMaxThreadNumber; i++) {
+    thread_list.emplace_back(std::thread(init_hash_per_thread, i));
   }
 
-  // then open all the data_fds_;
-  std::vector<std::string> data_dirs(kMaxThreadNumber);
-  data_dirs.clear();
+  open_data_fd_read();
 
-  if (0 != GetDirFiles(file_name_ + kDataDirName, &data_dirs)) {
-    DEBUG << "call GetDirFiles() failed: " << file_name_ + kDataDirName<< std::endl;
-  }
-  data_fds_.resize(data_dirs.size() + 1);
-
-  auto deal_single_data_dir = [&](const std::string &dn) {
-    std::vector<std::string> files(kMaxThreadNumber);
-    files.clear();
-    std::string sub_dir_name = file_name_ + kDataDirName + "/" + dn;
-    if (0 != GetDirFiles(sub_dir_name, &files)) {
-      DEBUG << "call GetDirFiles() failed: " << sub_dir_name << std::endl;
-    }
-    int x = atoi(dn.c_str());
-    data_fds_[x].resize(files.size()+1);
-    for (auto &f: files) {
-      auto file_name = sub_dir_name + "/" + f;
-      auto fd = open(file_name.c_str(), O_RDONLY | O_DIRECT | O_NOATIME, 0644);
-      if (fd < 0) {
-        DEBUG << "can not open file " << file_name << std::endl;
-        return;
-      }
-      data_fds_[x][atoi(f.c_str())-1] = fd;
-    }
-  };
-
-  for (auto &d: data_dirs) {
-    thread_list.emplace_back(std::thread(deal_single_data_dir, d));
-  }
   for (auto &v: thread_list) {
     v.join();
   }
@@ -329,15 +292,8 @@ EngineRace::~EngineRace() {
     UnlockFile(db_lock_);
   }
 
-  // read stage close all data fds.
-  for (auto &v: data_fds_) {
-    for (auto &x: v) {
-      if (x > 0) {
-        close(x);
-      }
-    }
-  }
-  data_fds_.clear();
+  // clean the data file direct IO opened files.
+  close_data_fd();
 
   if (stage_ == kReadStage) {
     // save all the kv into single file.
@@ -349,76 +305,30 @@ EngineRace::~EngineRace() {
   std::cout << "Total Time " << diff.count() / kNanoToMS << " (micro second)" << std::endl;
 }
 
-
 RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
-  // open 256 files.
-  struct shard_wrapper {
-    int *fds = nullptr;
-    uint32_t *offset = nullptr;
-    shard_wrapper() {
-      fds = (int*) malloc(sizeof(int) * kThreadShardNumber);
-      if (!fds) {
-        DEBUG << "malloc memory for shard_fds failed\n";
-      }
-      offset = (uint32_t*) malloc(sizeof(uint32_t) * kThreadShardNumber);
-      if (!offset) {
-        DEBUG << "malloc memory for offset failed\n";
-      }
-      memset(offset, 0, sizeof(uint32_t) * kThreadShardNumber);
+  static std::once_flag init_write;
+  std::call_once (init_write, [this] {
+    stage_ = kWriteStage;
+    write_lock_ = new spinlock[kThreadShardNumber];
+    if (!write_lock_) {
+      DEBUG << "new write_lock_ failed\n";
+      exit (-1);
     }
-
-    void init(char *dir) {
-      // open all the related files.
-      char path[64];
-      for (uint32_t i = 0; i < kThreadShardNumber; i++) {
-        sprintf(path, "%s/%d", dir, i+1);
-        int fd = open(path, O_WRONLY | O_CREAT | O_NONBLOCK | O_NOATIME, 0644);
-        if (fd < 0) {
-          DEBUG << "open path = " << path << "failed\n";
-          return;
-        }
-        fds[i] = fd;
-      }
-    }
-
-    ~shard_wrapper() {
-      for (uint32_t i = 0; i < kThreadShardNumber; i++) {
-        if (fds[i] > 0) {
-          close(fds[i]);
-        }
-      }
-      free(fds);
-    }
-  };
+    open_data_fd_write();
+  });
 
   static thread_local int m_thread_id = 0xffff;
-  static thread_local char path[64];
+  static thread_local char path[kPathLength];
   static thread_local int index_fd = -1;
   static thread_local struct disk_index di;
-  static thread_local struct shard_wrapper data_fd;
   static thread_local struct disk_index *mptr = nullptr;
   static thread_local int mptr_iter = 0;
 
-  di.key = toInt(key);
+  di.set_key(toInt(key));
   if (m_thread_id == 0xffff) {
-    stage_ = kWriteStage; // 0 stands for write.
-    auto thread_pid = pthread_self();
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    m_thread_id = thread_id_++;
-    CPU_SET(m_thread_id % max_cpu_cnt_, &cpuset);
-    pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
-
-    // need to create the thread dir.
+    m_thread_id = pin_cpu();
+    // every thread has its own index file.
     sprintf(path, "%sindex/%d", file_name_.c_str(), m_thread_id);
-    mkdir(path, 0755);
-    sprintf(path, "%sdata/%d", file_name_.c_str(), m_thread_id);
-    mkdir(path, 0755);
-    data_fd.init(path);
-
-    // TODO: this need to find out the last index of index file and data file.
-    // in real project.
-    sprintf(path, "%sindex/%d/%d", file_name_.c_str(), m_thread_id, 0/*index_id*/);
     index_fd = open(path, O_RDWR | O_CREAT | O_NOATIME | O_TRUNC, 0644);
     posix_fallocate(index_fd, 0, kMaxIndexFileSize); // 24MB
 
@@ -430,16 +340,18 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     memset(mptr, 0, kMaxIndexFileSize); // 24MB
   }
 
-  // because there just 256 shards.
-  auto idx = di.key >> 56;
-  di.set_file_no(m_thread_id, idx);
-  di.file_offset = data_fd.offset[idx];
-  if (write(data_fd.fds[idx], value.data(), kPageSize) != kPageSize) {
+  // because there just 256 files.
+  auto data_fd_iter = di.get_key() >> 56;
+  di.set_offset(data_fd_len_[data_fd_iter]);
+  write_lock_[data_fd_iter].lock();
+  if (write(data_fd_[data_fd_iter], value.data(), kPageSize) != kPageSize) {
     return kIOError;
   }
+  write_lock_[data_fd_iter].unlock();
+
   // pointer operate the ptr.
   mptr[mptr_iter++] = di;
-  data_fd.offset[idx] += kPageSize;
+  data_fd_len_[data_fd_iter] += kPageSize;
   return kSucc;
 }
 
@@ -450,6 +362,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   static std::once_flag init_mptr;
   std::call_once (init_mptr, [this] {
     stage_ = kReadStage; // Read
+    thread_id_ = 0;
     BEGIN_POINT(begin_build_hash_table);
     init_read();
     END_POINT(end_build_hash_table, begin_build_hash_table, "init_read_time");
@@ -461,33 +374,22 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
 
   static thread_local uint64_t m_thread_id = 0xffff;
   if (m_thread_id == 0xffff) {
-    auto thread_pid = pthread_self();
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    m_thread_id = thread_id_++;
-    CPU_SET(m_thread_id % max_cpu_cnt_, &cpuset);
-    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
-    if (rc != 0) {
-      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
-    }
+    m_thread_id = pin_cpu();
   }
 
   static thread_local struct aio_env_single read_aio(-1, true/*read*/, true/*buf*/);
-  uint32_t file_no = 0;
+  uint32_t data_fd_iter = 0;
   uint32_t file_offset = 0;
   uint64_t k64 = toInt(key);
-  auto ret = hash_.GetNoLock((char*)(&k64), &file_no, &file_offset);
+  auto ret = hash_.GetNoLock(k64, &data_fd_iter, &file_offset);
+
   if (ret != kSucc) {
     return kNotFound;
   }
 
-  // then begin to get the data dir.
-  int data_dir = file_no >> 16;
-  int sub_file_no = file_no & 0xffff;
-
   // begin to find the key & pos
   // TODO use non-block read to count the bytes read then copy to value.
-  read_aio.SetFD(data_fds_[data_dir][sub_file_no]);
+  read_aio.SetFD(data_fd_[data_fd_iter]);
   read_aio.Prepare(file_offset);
   read_aio.Submit();
   read_aio.WaitOver();
@@ -530,7 +432,7 @@ RetCode EngineRace::SlowRead(const PolarString &lower, const PolarString &upper,
   if (!include_start) {
     start_pos = std::lower_bound(all, all + tail, start,
       [](const struct disk_index &d, const uint64_t v) -> bool {
-        return d.key < v;
+        return d.get_key() < v;
       }
     );
   }
@@ -538,43 +440,25 @@ RetCode EngineRace::SlowRead(const PolarString &lower, const PolarString &upper,
   if (!include_end) {
     end_pos = std::lower_bound(start_pos, all + tail, end,
       [](const disk_index &d, const uint64_t v) -> bool {
-        return d.key < v;
+        return d.get_key() < v;
       }
     );
   }
 
   std::string data_path = file_name_ + kDataDirName;
-  char path[64];
   for (auto iter = start_pos; iter != end_pos; iter++) {
-      uint32_t file_no = iter->file_no;
-      uint32_t file_offset = iter->file_offset;
-      int data_dir = file_no >> 16;
-      int sub_file_no = file_no & 0xffff;
-      // NOTE!! file_no should add 1
-      // if want to open it directl
-      sprintf(path, "%s/%d/%d", data_path.c_str(), data_dir, sub_file_no + 1);
-      int fd = open(path, O_RDONLY | O_NOATIME, 0644);
-      if (fd < 0) {
-        DEBUG << "can not open file " << path << std::endl;
-        return kIOError;
-      }
-      lseek(fd, file_offset, SEEK_SET);
-      char *value = GetAlignedBuffer(kPageSize);
-      if (read(fd, value, kPageSize) != kPageSize) {
-        DEBUG << "read file meet error\n";
-        return kIOError;
-      }
-      uint64_t k64 = toBack(iter->key);
-      PolarString k((char*)(&k64), kMaxKeyLen);
-      PolarString v(value, kPageSize);
-      visitor.Visit(k, v);
-      close(fd);
-      free(value);
+    uint64_t k64 = toBack(iter->get_key());
+    PolarString k((char*)(&k64), kMaxKeyLen);
+    std::string value;
+    Read(k, &value);
+    PolarString v(value);
+    visitor.Visit(k, v);
   }
   free(all);
   return kSucc;
 }
 
+// TODO: OPT: change to direct IO
 void EngineRace::ReadIndexEntry() {
   // open index file.
   int index_fd = open(AllIndexFile(), O_RDONLY | O_NONBLOCK | O_NOATIME | O_DIRECT, 0644);
@@ -601,49 +485,23 @@ void EngineRace::ReadIndexEntry() {
 }
 
 void EngineRace::ReadDataEntry() {
-  struct file_info {
-    int fd = -1;
-    int flen = 0;
-  };
-  struct file_info data_fd[kMaxThreadNumber][kThreadShardNumber];
+  open_data_fd_range();
 
-  std::string data_path = file_name_ + kDataDirName;
-  char path[64];
-  for (int i = 0; i < kMaxThreadNumber; i++) {
-    for (int j = 0; j < (int)kThreadShardNumber; j++) {
-      sprintf(path, "%s/%d/%d", data_path.c_str(), i, j+1);
-      data_fd[i][j].fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT, 0644);
-      data_fd[i][j].flen = get_file_length(path);
-    }
-  }
+  struct aio_env_single read_aio(-1, true/*read*/, false/*no_buf*/);
 
-  aio_env_range<kMaxThreadNumber> read_aio;
   constexpr uint64_t cache_size = 1048576000ull;
   char *current_buf = GetAlignedBuffer(cache_size);
   char *next_buf = GetAlignedBuffer(cache_size);
-  char *next_data_buf[kMaxThreadNumber] = {nullptr};
-
   if (!current_buf || !next_buf) {
     DEBUG << "alloc memory for data buf failed\n";
-    return;
+    exit(-1);
   }
 
-  // init:
-  // read data into next.
-  // firstly, read the shard 1.
   auto read_next_buf = [&](int file_no) {
-    char *head = next_buf;
-    read_aio.Clear();
-    for (int i = 0; i < kMaxThreadNumber; i++) {
-      int fd = data_fd[i][file_no].fd;
-      int flen = data_fd[i][file_no].flen;
-      next_data_buf[i] = head;
-      read_aio.PrepareRead(fd, 0, next_data_buf[i], flen);
-      head += flen;
-    }
+    read_aio.SetFD(data_fd_[file_no]);
+    read_aio.Prepare(0, next_buf, cache_size);
     read_aio.Submit();
   };
-
   read_next_buf(0);
 
   int next_op_file_no = 0;
@@ -651,9 +509,8 @@ void EngineRace::ReadDataEntry() {
     is_ok_to_read_data();
     read_aio.WaitOver();
     std::swap(next_buf, current_buf);
-    for (int i = 0; i < kMaxThreadNumber; i++) {
-      data_buf_[i] = next_data_buf[i];
-    }
+    // now current contains valid data.
+    data_buf_ = current_buf;
     ask_to_visit_data();
     next_op_file_no = (next_op_file_no + 1) % kThreadShardNumber;
     read_next_buf(next_op_file_no);
@@ -695,15 +552,7 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
 
   static thread_local uint64_t m_thread_id = 0xffff;
   if (m_thread_id == 0xffff) {
-    auto thread_pid = pthread_self();
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    m_thread_id = thread_id_++;
-    CPU_SET(m_thread_id % max_cpu_cnt_, &cpuset);
-    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
-    if (rc != 0) {
-      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
-    }
+    m_thread_id = pin_cpu();
   }
 
   // here must deal with 64 threads.
@@ -719,24 +568,22 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
     if (!buf_size_) {
       break;
     }
+
     // scan every item.
     struct disk_index *di = (struct disk_index*) index_buf_;
     const uint64_t total_item = buf_size_ / sizeof(struct disk_index);
     for (uint64_t i = 0; i < total_item; i++) {
       auto &ref = di[i];
-      uint32_t file_no = ref.file_no;
-      uint32_t file_offset = ref.file_offset;
+      int file_no = ref.get_file_number();
+      uint32_t file_offset = ref.get_offset();
+      uint64_t k64 = toBack(ref.get_key());
 
-      int data_dir = file_no >> 16;
-      int sub_file_no = (file_no & 0xffff);
-      uint64_t k64 = toBack(ref.key);
-
-      if (open_file_no != sub_file_no) {
-        open_file_no = sub_file_no;
+      if (open_file_no != file_no) {
+        open_file_no = file_no;
         ask_to_read_data(m_thread_id);
         is_ok_to_visit_data(m_thread_id);
       }
-      char *pos = data_buf_[data_dir] + file_offset;
+      char *pos = data_buf_ + file_offset;
       k.init((char*)(&k64), kMaxKeyLen);
       v.init(pos, kPageSize);
       visitor.Visit(k, v);
