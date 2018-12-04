@@ -347,11 +347,11 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   if (write(data_fd_[data_fd_iter], value.data(), kPageSize) != kPageSize) {
     return kIOError;
   }
+  data_fd_len_[data_fd_iter] += kPageSize;
   write_lock_[data_fd_iter].unlock();
 
   // pointer operate the ptr.
   mptr[mptr_iter++] = di;
-  data_fd_len_[data_fd_iter] += kPageSize;
   return kSucc;
 }
 
