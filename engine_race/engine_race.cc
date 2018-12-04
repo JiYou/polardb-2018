@@ -342,8 +342,8 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
 
   // because there just 256 files.
   auto data_fd_iter = di.get_key() >> 56;
-  di.set_offset(data_fd_len_[data_fd_iter]);
   write_lock_[data_fd_iter].lock();
+  di.set_offset(data_fd_len_[data_fd_iter]);
   if (write(data_fd_[data_fd_iter], value.data(), kPageSize) != kPageSize) {
     return kIOError;
   }
@@ -393,6 +393,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   read_aio.Prepare(file_offset);
   read_aio.Submit();
   read_aio.WaitOver();
+
   value->assign(read_aio.buf, kPageSize);
   return kSucc;
 }
@@ -446,13 +447,30 @@ RetCode EngineRace::SlowRead(const PolarString &lower, const PolarString &upper,
   }
 
   std::string data_path = file_name_ + kDataDirName;
+  char path[kPathLength];
   for (auto iter = start_pos; iter != end_pos; iter++) {
-    uint64_t k64 = toBack(iter->get_key());
-    PolarString k((char*)(&k64), kMaxKeyLen);
-    std::string value;
-    Read(k, &value);
-    PolarString v(value);
-    visitor.Visit(k, v);
+      int file_no = iter->get_file_number();
+      uint32_t file_offset = iter->get_offset();
+      // NOTE!! file_no should add 1
+      // if want to open it directl
+      sprintf(path, "%s/%d", data_path.c_str(), file_no);
+      int fd = open(path, O_RDONLY | O_NOATIME, 0644);
+      if (fd < 0) {
+        DEBUG << "can not open file " << path << std::endl;
+        return kIOError;
+      }
+      lseek(fd, file_offset, SEEK_SET);
+      char *value = GetAlignedBuffer(kPageSize);
+      if (read(fd, value, kPageSize) != kPageSize) {
+        DEBUG << "read file meet error\n";
+        return kIOError;
+      }
+      uint64_t k64 = toBack(iter->get_key());
+      PolarString k((char*)(&k64), kMaxKeyLen);
+      PolarString v(value, kPageSize);
+      visitor.Visit(k, v);
+      close(fd);
+      free(value);
   }
   free(all);
   return kSucc;
