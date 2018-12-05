@@ -148,9 +148,6 @@ void HashTreeTable::Save(const char *file_name) {
   const int total = write_buffer_size / sizeof(struct disk_index);
   int kv_item_cnt = 0;
 
-  bool has_previous = false;
-  struct disk_index pre_di;
-
   for (auto &vs: hash_) {
     kv_item_cnt += vs.size();
     if (!vs.empty()) {
@@ -163,16 +160,7 @@ void HashTreeTable::Save(const char *file_name) {
           iter = 0;
         }
 
-        if (has_previous) {
-          if (pre_di.get_key() >= x.get_key()) {
-            DEBUG << "ERROR: save key index not sort\n";
-            exit(-1);
-          }
-        }
-
         di[iter++] = x;
-        has_previous = true;
-        pre_di = x;
       }
     }
   }
@@ -523,7 +511,7 @@ void EngineRace::ReadDataEntry() {
   DEBUG << "Range: max_file_length = " << max_file_length << std::endl;
 
   struct aio_env_single read_aio(-1, true/*read*/, false/*no_buf*/);
-  const uint64_t cache_size = max_file_length;
+  const uint64_t cache_size = max_file_length + kPageSize;
   char *current_buf = GetAlignedBuffer(cache_size);
   char *next_buf = GetAlignedBuffer(cache_size);
   if (!current_buf || !next_buf) {
@@ -533,7 +521,7 @@ void EngineRace::ReadDataEntry() {
 
   auto read_next_buf = [&](int file_no) {
     read_aio.SetFD(data_fd_[file_no]);
-    read_aio.Prepare(0, next_buf, cache_size);
+    read_aio.Prepare(0, next_buf, data_fd_len_[file_no]);
     read_aio.Submit();
   };
   read_next_buf(0);
@@ -586,7 +574,15 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
 
   static thread_local uint64_t m_thread_id = 0xffff;
   if (m_thread_id == 0xffff) {
-    m_thread_id = pin_cpu();
+    auto thread_pid = pthread_self();
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    m_thread_id = thread_id_++;
+    CPU_SET(m_thread_id % max_cpu_cnt_, &cpuset);
+    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+    }
   }
 
   // here must deal with 64 threads.
