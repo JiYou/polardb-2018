@@ -58,7 +58,7 @@ RetCode HashTreeTable::find(std::vector<struct disk_index> &vs,
   return kNotFound;
 }
 
-RetCode HashTreeTable::GetNoLock(uint64_t key, uint32_t *file_no, uint32_t *file_offset) {
+RetCode HashTreeTable::GetNoLock(uint64_t key, uint64_t *file_no, uint32_t *file_offset) {
   const uint64_t array_pos = compute_pos(key);
   // then begin to search this array.
   auto &vs = hash_[array_pos];
@@ -378,7 +378,7 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   }
 
   static thread_local struct aio_env_single read_aio(-1, true/*read*/, true/*buf*/);
-  uint32_t data_fd_iter = 0;
+  uint64_t data_fd_iter = 0;
   uint32_t file_offset = 0;
   uint64_t k64 = toInt(key);
   auto ret = hash_.GetNoLock(k64, &data_fd_iter, &file_offset);
@@ -449,11 +449,12 @@ RetCode EngineRace::SlowRead(const PolarString &lower, const PolarString &upper,
   std::string data_path = file_name_ + kDataDirName;
   char path[kPathLength];
   for (auto iter = start_pos; iter != end_pos; iter++) {
-      int file_no = iter->get_file_number();
+      uint64_t file_no = iter->get_file_number();
       uint32_t file_offset = iter->get_offset();
       // NOTE!! file_no should add 1
       // if want to open it directl
-      sprintf(path, "%s/%d", data_path.c_str(), file_no);
+      int file_id = file_no;
+      sprintf(path, "%s/%d", data_path.c_str(), file_id);
       int fd = open(path, O_RDONLY | O_NOATIME, 0644);
       if (fd < 0) {
         DEBUG << "can not open file " << path << std::endl;
@@ -592,7 +593,7 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
 
   // here must deal with 64 threads.
   // When comes to here, ask the cache-thread to read cache.
-  int open_file_no = -1;
+  uint64_t open_file_no {0xffffffffffffffffull};
   PolarString k, v;
   k.set_change(); v.set_change();
 
@@ -609,7 +610,7 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
     const uint64_t total_item = buf_size_ / sizeof(struct disk_index);
     for (uint64_t i = 0; i < total_item; i++) {
       auto &ref = di[i];
-      int file_no = ref.get_file_number();
+      uint64_t file_no = ref.get_file_number();
       uint32_t file_offset = ref.get_offset();
       uint64_t k64 = toBack(ref.get_key());
 

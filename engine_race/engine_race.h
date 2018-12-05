@@ -77,8 +77,7 @@ class disk_index {
     offset_ = offset;
   }
 
-  // NOTE: return value [0, 256);
-  uint16_t get_file_number() const {
+  uint64_t get_file_number() const {
     return (key_ >> 56);
   }
 
@@ -108,7 +107,7 @@ class disk_index {
 
 class HashTreeTable {
  public:
-  RetCode GetNoLock(uint64_t key, uint32_t *file_no, uint32_t *file_offset); // no_lock
+  RetCode GetNoLock(uint64_t key, uint64_t *file_no, uint32_t *file_offset); // no_lock
   RetCode SetNoLock(uint64_t key, uint32_t file_offset, spinlock *ar); // no_lock
 
   // NOTE: no lock here. Do not call it anywhere.
