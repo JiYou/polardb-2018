@@ -80,7 +80,6 @@ RetCode HashTreeTable::SetNoLock(uint64_t key, uint32_t file_offset, spinlock *a
   }
 
   auto &vs = hash_[array_pos];
-  auto ret = kNotFound;
   for (auto &x: vs) {
     if (static_cast<uint64_t>(x.get_key()) == key) {
       x.set_offset(file_offset);
@@ -148,6 +147,10 @@ void HashTreeTable::Save(const char *file_name) {
   int iter = 0;
   const int total = write_buffer_size / sizeof(struct disk_index);
   int kv_item_cnt = 0;
+
+  bool has_previous = false;
+  struct disk_index pre_di;
+
   for (auto &vs: hash_) {
     kv_item_cnt += vs.size();
     if (!vs.empty()) {
@@ -159,7 +162,17 @@ void HashTreeTable::Save(const char *file_name) {
           }
           iter = 0;
         }
+
+        if (has_previous) {
+          if (pre_di.get_key() >= x.get_key()) {
+            DEBUG << "ERROR: save key index not sort\n";
+            exit(-1);
+          }
+        }
+
         di[iter++] = x;
+        has_previous = true;
+        pre_di = x;
       }
     }
   }
