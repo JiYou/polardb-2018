@@ -616,6 +616,21 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
       char *pos = data_buf_ + file_offset;
       k.init((char*)(&k64), kMaxKeyLen);
       v.init(pos, kPageSize);
+
+      {
+        // use aio to verify
+        struct aio_env_single read_aio(data_fd_[file_no], true/*read*/, true/*buf*/);
+        read_aio.Prepare(file_offset);
+        read_aio.Submit();
+        read_aio.WaitOver();
+        PolarString test(read_aio.buf, kPageSize);
+        PolarString r(pos, kPageSize);
+        if (r != test) {
+          DEBUG << "Value is not equal to AIO read\n";
+          exit(-1);
+        }
+      }
+
       visitor.Visit(k, v);
     }
   }
