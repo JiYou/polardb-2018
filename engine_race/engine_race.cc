@@ -521,10 +521,8 @@ void EngineRace::ReadDataEntry() {
   // get the maxium file length.
   int max_file_length = 0;
   for (uint32_t i = 0; i < kThreadShardNumber; i++) {
-    DEBUG << " file[" << i << "] = " << data_fd_len_[i] << std::endl;
     max_file_length = std::max(max_file_length, data_fd_len_[i]);
   }
-  DEBUG << "Range: max_file_length = " << max_file_length << std::endl;
 
   const uint64_t cache_size = max_file_length + kPageSize;
   char *current_buf = GetAlignedBuffer(cache_size);
@@ -549,7 +547,6 @@ void EngineRace::ReadDataEntry() {
   while (true) {
     is_ok_to_read_data();
     read_aio.WaitOver();
-    DEBUG << "read over = " << next_op_file_no << std::endl;
     std::swap(next_buf, current_buf);
     data_buf_ = has_data_buf;
     ask_to_visit_data();
@@ -593,15 +590,7 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
 
   static thread_local uint64_t m_thread_id = 0xffff;
   if (m_thread_id == 0xffff) {
-    auto thread_pid = pthread_self();
-    cpu_set_t cpuset;
-    CPU_ZERO(&cpuset);
-    m_thread_id = thread_id_++;
-    CPU_SET(m_thread_id % max_cpu_cnt_, &cpuset);
-    int rc = pthread_setaffinity_np(thread_pid, sizeof(cpu_set_t), &cpuset);
-    if (rc != 0) {
-      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
-    }
+    m_thread_id = pin_cpu();
   }
 
   // here must deal with 64 threads.
@@ -628,9 +617,6 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
       uint64_t k64 = toBack(ref.get_key());
 
       if (open_file_no != file_no) {
-        if (m_thread_id == 0) {
-          DEBUG << "visit: want to read " << file_no << std::endl;
-        }
         open_file_no = file_no;
         ask_to_read_data(m_thread_id);
         is_ok_to_visit_data(m_thread_id);
