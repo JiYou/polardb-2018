@@ -199,12 +199,13 @@ struct aio_env_single {
     return kSucc;
   }
 
-  void WaitOver() {
+  unsigned long WaitOver() {
     // after submit, need to wait all read over.
     while (io_getevents(ctx, kSingleRequest, kSingleRequest,
                         &events, &(timeout)) != kSingleRequest) {
       /**/
     }
+    return events.res;
   }
 
   ~aio_env_single() {

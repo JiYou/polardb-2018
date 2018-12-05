@@ -480,23 +480,25 @@ RetCode EngineRace::SlowRead(const PolarString &lower, const PolarString &upper,
 // TODO: OPT: change to direct IO
 void EngineRace::ReadIndexEntry() {
   // open index file.
-  int index_fd = open(AllIndexFile(), O_RDONLY | O_NONBLOCK | O_NOATIME | O_DIRECT, 0644);
+  int index_fd = open(AllIndexFile(), O_RDONLY | O_NOATIME | O_DIRECT, 0644);
   auto flen = get_file_length(AllIndexFile());
   int read_pos = 0;
   index_buf_ = GetAlignedBuffer(k16MB);
+  struct aio_env_single read_aio(index_fd, true, false);
   while (true) {
     int bytes = 0;
     is_ok_to_read_index();
     // if read to the end.
     // seek back to the header.
     if (read_pos == flen) {
-      lseek(index_fd, 0, SEEK_SET);
       read_pos = 0;
       buf_size_ = 0;
       ask_to_visit_index();
       continue;
     }
-    bytes = read_file(index_fd, index_buf_, k16MB);
+    read_aio.Prepare(read_pos, index_buf_, k16MB);
+    read_aio.Submit();
+    bytes = read_aio.WaitOver();
     read_pos += bytes;
     buf_size_ = bytes;
     ask_to_visit_index();
