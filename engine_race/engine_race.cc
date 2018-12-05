@@ -328,14 +328,14 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     // every thread has its own index file.
     sprintf(path, "%sindex/%d", file_name_.c_str(), m_thread_id);
     index_fd = open(path, O_RDWR | O_CREAT | O_NOATIME | O_TRUNC, 0644);
-    posix_fallocate(index_fd, 0, kMaxIndexFileSize); // 24MB
+    posix_fallocate(index_fd, 0, kMaxIndexFileSize); // 12MB
 
     auto ptr = mmap(NULL, kMaxIndexFileSize, PROT_READ|PROT_WRITE, MAP_SHARED | MAP_POPULATE, index_fd, 0);
     if (ptr == MAP_FAILED) {
       DEBUG << "map failed for index write\n";
     }
     mptr = reinterpret_cast<struct disk_index*>(ptr);
-    memset(mptr, 0, kMaxIndexFileSize); // 24MB
+    memset(mptr, 0, kMaxIndexFileSize); // 12MB
   }
 
   // because there just 256 files.
@@ -502,10 +502,15 @@ void EngineRace::ReadIndexEntry() {
 
 void EngineRace::ReadDataEntry() {
   open_data_fd_range();
+  // get the maxium file length.
+  int max_file_length = 0;
+  for (uint32_t i = 0; i < kThreadShardNumber; i++) {
+    max_file_length = std::max(max_file_length, data_fd_len_[i]);
+  }
+  DEBUG << "Range: max_file_length = " << max_file_length << std::endl;
 
   struct aio_env_single read_aio(-1, true/*read*/, false/*no_buf*/);
-
-  constexpr uint64_t cache_size = 1048576000ull;
+  const uint64_t cache_size = max_file_length;
   char *current_buf = GetAlignedBuffer(cache_size);
   char *next_buf = GetAlignedBuffer(cache_size);
   if (!current_buf || !next_buf) {
