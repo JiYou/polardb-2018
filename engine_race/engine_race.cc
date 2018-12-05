@@ -84,15 +84,14 @@ RetCode HashTreeTable::SetNoLock(uint64_t key, uint32_t file_offset, spinlock *a
   for (auto &x: vs) {
     if (static_cast<uint64_t>(x.get_key()) == key) {
       x.set_offset(file_offset);
-      ret = kSucc;
-      break;
+      if (ar) {
+        ar[array_pos].unlock();
+      }
+      return kSucc;
     }
   }
 
-  if (ret == kNotFound) {
-    vs.emplace_back(key, file_offset);
-  }
-
+  vs.emplace_back(key, file_offset);
   if (ar) {
     ar[array_pos].unlock();
   }
@@ -148,7 +147,9 @@ void HashTreeTable::Save(const char *file_name) {
   struct disk_index *di = (struct disk_index*) write_buffer;
   int iter = 0;
   const int total = write_buffer_size / sizeof(struct disk_index);
+  int kv_item_cnt = 0;
   for (auto &vs: hash_) {
+    kv_item_cnt += vs.size();
     if (!vs.empty()) {
       for (auto &x: vs) {
         if (iter == total) {
@@ -162,6 +163,7 @@ void HashTreeTable::Save(const char *file_name) {
       }
     }
   }
+  DEBUG << "total kv_item_cnt = " << kv_item_cnt << std::endl;
   if (iter) {
     int write_size = iter * sizeof(struct disk_index);
     if (write(fd, write_buffer, write_size) != write_size) {
