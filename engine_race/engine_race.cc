@@ -506,6 +506,7 @@ void EngineRace::ReadDataEntry() {
   // get the maxium file length.
   int max_file_length = 0;
   for (uint32_t i = 0; i < kThreadShardNumber; i++) {
+    DEBUG << " file[" << i << "] = " << data_fd_len_[i] << std::endl;
     max_file_length = std::max(max_file_length, data_fd_len_[i]);
   }
   DEBUG << "Range: max_file_length = " << max_file_length << std::endl;
@@ -520,6 +521,7 @@ void EngineRace::ReadDataEntry() {
   }
 
   auto read_next_buf = [&](int file_no) {
+    DEBUG << " reading file = " << file_no << std::endl;
     read_aio.SetFD(data_fd_[file_no]);
     read_aio.Prepare(0, next_buf, data_fd_len_[file_no]);
     read_aio.Submit();
@@ -530,6 +532,7 @@ void EngineRace::ReadDataEntry() {
   while (true) {
     is_ok_to_read_data();
     read_aio.WaitOver();
+    DEBUG << "read over = " << next_op_file_no << std::endl;
     std::swap(next_buf, current_buf);
     // now current contains valid data.
     data_buf_ = current_buf;
@@ -609,28 +612,33 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
       uint64_t k64 = toBack(ref.get_key());
 
       if (open_file_no != file_no) {
+
+        if (m_thread_id == 0) {
+          DEBUG << "visit: want to read " << file_no << std::endl;
+        }
+
         open_file_no = file_no;
         ask_to_read_data(m_thread_id);
         is_ok_to_visit_data(m_thread_id);
+	      {
+          // use aio to verify
+          struct aio_env_single read_aio(data_fd_[file_no], true/*read*/, true/*buf*/);
+          read_aio.Prepare(file_offset);
+          read_aio.Submit();
+          read_aio.WaitOver();
+          PolarString test(read_aio.buf, kPageSize);
+          char *pos = data_buf_ + file_offset;
+          PolarString r(pos, kPageSize);
+          if (r != test) {
+            DEBUG << "key = " << k64 << ":" << file_no << " - " << file_offset << std::endl;
+            DEBUG << "Value is not equal to AIO read\n";
+            exit(-1);
+          }
+        }
       }
       char *pos = data_buf_ + file_offset;
       k.init((char*)(&k64), kMaxKeyLen);
       v.init(pos, kPageSize);
-
-      {
-        // use aio to verify
-        struct aio_env_single read_aio(data_fd_[file_no], true/*read*/, true/*buf*/);
-        read_aio.Prepare(file_offset);
-        read_aio.Submit();
-        read_aio.WaitOver();
-        PolarString test(read_aio.buf, kPageSize);
-        PolarString r(pos, kPageSize);
-        if (r != test) {
-          DEBUG << "Value is not equal to AIO read\n";
-          exit(-1);
-        }
-      }
-
       visitor.Visit(k, v);
     }
   }
