@@ -483,7 +483,11 @@ void EngineRace::ReadIndexEntry() {
   int index_fd = open(AllIndexFile(), O_RDONLY | O_NOATIME | O_DIRECT, 0644);
   auto flen = get_file_length(AllIndexFile());
   int read_pos = 0;
-  index_buf_ = GetAlignedBuffer(k16MB);
+
+  // NOTE: must be times  of sizeof(struct disk_index);
+  // 24MB here.
+  constexpr uint64_t k24MB = 1024ull * 1024ull * sizeof(struct disk_index) * 2;
+  index_buf_ = GetAlignedBuffer(k24MB);
   struct aio_env_single read_aio(index_fd, true, false);
   while (true) {
     int bytes = 0;
@@ -496,7 +500,7 @@ void EngineRace::ReadIndexEntry() {
       ask_to_visit_index();
       continue;
     }
-    read_aio.Prepare(read_pos, index_buf_, k16MB);
+    read_aio.Prepare(read_pos, index_buf_, k24MB);
     read_aio.Submit();
     bytes = read_aio.WaitOver();
     read_pos += bytes;
