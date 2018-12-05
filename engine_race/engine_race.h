@@ -334,7 +334,15 @@ class EngineRace : public Engine  {
         // DO not exit, may this file not exits.
       }
       data_fd_[i] = fd;
-      data_fd_len_[i] = 0;
+
+      if (0 == i) {
+        std::string str(kPageSize, '.');
+        if (write(data_fd_[0], str.c_str(), kPageSize) != kPageSize) {
+          DEBUG << "write file 0 first 4K meet error\n";
+          exit(-1);
+        }
+        data_fd_len_[0] = kPageSize;
+      }
     }
     has_open_data_fd_ = true;
   }

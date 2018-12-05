@@ -80,7 +80,6 @@ RetCode HashTreeTable::SetNoLock(uint64_t key, uint32_t file_offset, spinlock *a
   }
 
   auto &vs = hash_[array_pos];
-  // auto ret = find(vs, *k, &ptr);
   auto ret = kNotFound;
   for (auto &x: vs) {
     if (static_cast<uint64_t>(x.get_key()) == key) {
@@ -102,9 +101,6 @@ RetCode HashTreeTable::SetNoLock(uint64_t key, uint32_t file_offset, spinlock *a
 }
 
 void HashTreeTable::Sort() {
-  // there are 64 thread.
-  // split all the range to 64 threads.
-  // every thread would contains 104354.
   auto sort_range = [this](const size_t begin, const size_t end) {
     for (size_t i = begin; i < end && i < kMaxBucketSize; i++) {
       auto &vs = hash_[i];
