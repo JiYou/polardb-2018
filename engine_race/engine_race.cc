@@ -40,7 +40,7 @@ static const char kBigFileName[] = "DB";
 uint32_t HashTreeTable::compute_pos(uint64_t x) {
   // hash tree algorithm
   //return (((((x % 17) * 19 + x % 19) * 23 + x % 23) * 29 + x % 29) * 31 + x % 31);
-  return x >> 41;
+  return x >> 48;
 }
 
 RetCode HashTreeTable::find(std::vector<struct disk_index> &vs,
