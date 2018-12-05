@@ -334,11 +334,8 @@ class EngineRace : public Engine  {
         // DO not exit, may this file not exits.
       }
       data_fd_[i] = fd;
+      data_fd_len_[i] = 0;
     }
-    posix_fallocate(data_fd_[0], 0, kPageSize);
-    lseek(data_fd_[0], 0, SEEK_END);
-    // change the start position.
-    data_fd_len_[0] = kPageSize;
     has_open_data_fd_ = true;
   }
 
@@ -346,7 +343,6 @@ class EngineRace : public Engine  {
  private:
   void init_read();
   HashTreeTable hash_; // for the read index.
-
 
  // Range Stage
  // TODO here is just for 64 threads: call these threads visit-thread.
