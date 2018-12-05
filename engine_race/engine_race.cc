@@ -137,7 +137,14 @@ void HashTreeTable::Save(const char *file_name) {
     DEBUG << "open " << file_name << "failed\n";
     return;
   }
-  constexpr uint64_t write_buffer_size = k256MB;
+  // constexpr uint64_t write_buffer_size = k256MB;
+  // NOTE!! Big Bug
+  // if use 256, it can not devided by sizeof (struct disk_index)
+  // it would cause read-error.
+  // so, need to change to times of sizeof(struct disk_index)
+  // Because sizeof(struct disk_index) == 12,
+  // So, here uses 240MB
+  constexpr uint64_t write_buffer_size = sizeof(struct disk_index) * 1024ull * 1024ull * 20;
   char *write_buffer = GetAlignedBuffer(write_buffer_size);
   if (!write_buffer) {
     DEBUG << "alloc memory for write_buffer failed\n";
@@ -477,7 +484,6 @@ RetCode EngineRace::SlowRead(const PolarString &lower, const PolarString &upper,
   return kSucc;
 }
 
-// TODO: OPT: change to direct IO
 void EngineRace::ReadIndexEntry() {
   // open index file.
   int index_fd = open(AllIndexFile(), O_RDONLY | O_NOATIME | O_DIRECT, 0644);
@@ -486,6 +492,7 @@ void EngineRace::ReadIndexEntry() {
 
   // NOTE: must be times  of sizeof(struct disk_index);
   // 24MB here.
+  // Other values such as 4K can not be deviced by 12, would cause bug.
   constexpr uint64_t k24MB = 1024ull * 1024ull * sizeof(struct disk_index) * 2;
   index_buf_ = GetAlignedBuffer(k24MB);
   struct aio_env_single read_aio(index_fd, true, false);
