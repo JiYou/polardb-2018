@@ -244,10 +244,94 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 
 // this is build up just for read.
 void EngineRace::init_read() {
-  hash_.Init(hash_bucket_counter_);
+  // alloc memory for file cache.
+  open_data_fd_read();
+  // find out the biggest file size.
+  // for build hash_map
+  // At least there ould be 960MB for cache.
+  // because read all the hash file would take
+  // 12 * 64 ~= 768MB and other for temporiy useage.
+  int max_length_file_iter = 0;
+  int max_cache_size = max_data_file_length(&max_length_file_iter) + kPageSize;
+  constexpr int min_cache_size {1006632960};
+  max_cache_size = std::max(max_cache_size, min_cache_size);
+  file_cache_for_read_ = GetAlignedBuffer(max_cache_size);
+  if (!file_cache_for_read_) {
+    DEBUG << "malloc memory for read stage_ data file cache failed\n";
+    exit(-1);
+  }
 
+  // read all the file out and into file buffer.
+  struct aio_env_range<kThreadShardNumber> read_aio;
+  read_aio.Clear();
+  int all_index_fd[kMaxThreadNumber];
+  const std::string index_dir = file_name_ + kMetaDirName;
+  char path[kPathLength];
+  for (int i = 0; i < kMaxThreadNumber; i++) {
+    sprintf(path, "%s/%d", index_dir.c_str(), i);
+    auto fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT, 0644);
+    if (fd < 0) {
+      /*is there is just single thread, skip this failed*/;
+      continue;
+    }
+    all_index_fd[i] = fd;
+    char *buf = file_cache_for_read_ + i * kMaxIndexFileSize;
+    read_aio.PrepareRead(fd, 0, buf, kMaxIndexFileSize);
+  }
+  read_aio.Submit();
+  read_aio.WaitOver();
+
+  // after all is read over.
+  for (int i = 0; i < kMaxThreadNumber; i++) {
+    if (all_index_fd[i] > 0) {
+      close(all_index_fd[i]);
+    }
+  }
+
+  // then begin to build the hash_bucket_counter_
+  // this is the header for all the 64 threads
+  // counter.
+  uint32_t *hash_bucket_counter_header = (uint32_t*)
+          (file_cache_for_read_ + kMaxThreadNumber * kMaxIndexFileSize);
+
+  auto bucket_counter_func = [&](int thread_id, uint32_t *counter) {
+    memset(counter, 0, kMaxBucketSize * sizeof(uint32_t));
+    char *start = file_cache_for_read_ + thread_id * kMaxIndexFileSize;
+    char *end = start + kMaxIndexFileSize;
+    struct disk_index *ar = (struct disk_index*) start;
+    while (ar < (struct disk_index*)end) {
+      if (!(ar->is_valid())) {
+        break;
+      }
+      auto shard_id = hash_.Shard(ar->get_key());
+      counter[shard_id]++;
+      ar++;
+    }
+  };
+
+  // use 64 threads to build the counter.
   std::vector<std::thread> thread_list(kMaxThreadNumber);
   thread_list.clear();
+
+  for (uint32_t i = 0; i < kMaxThreadNumber; i++) {
+    uint32_t *counter = hash_bucket_counter_header + i * kMaxBucketSize * sizeof(uint32_t);
+    thread_list.emplace_back(std::thread(bucket_counter_func, i, counter));
+  }
+  for (auto &x: thread_list) {
+    x.join();
+  }
+  thread_list.clear();
+
+  // then sum all the counter to one.
+  uint32_t *sum_counter = hash_bucket_counter_header;
+  for (uint32_t i = 1; i < kMaxThreadNumber; i++) {
+    uint32_t *counter = hash_bucket_counter_header + i * kMaxBucketSize * sizeof(uint32_t);
+    for (uint32_t j = 0; j < kMaxBucketSize; j++) {
+      sum_counter[j] += counter[j];
+    }
+  }
+
+  hash_.Init(sum_counter);
 
   spinlock *shard_locks = new spinlock[kMaxBucketSize];
   if (!shard_locks) {
@@ -255,42 +339,37 @@ void EngineRace::init_read() {
     return;
   }
 
-  // just read the index files.
-  // NOTE change the dir to test_engine/index/(0~~255)
-  // OPT: use aio to read all the index file.
-  const std::string index_dir = file_name_ + kMetaDirName;
+  // use 64 threads to build the hash table.
   auto init_hash_per_thread = [&](int thread_id) {
-    // open the folder.
-    char path[64];
-    sprintf(path, "%s/%d", index_dir.c_str(), thread_id);
-    auto fd = open(path, O_RDONLY | O_NOATIME, 0644);
-    if (fd < 0) {
-      /*is there is just single thread, open would failed*/;
-      return;
-    }
-    struct disk_index di;
-    while (read(fd, &di, sizeof(disk_index)) == sizeof(struct disk_index)) {
-      if (!di.is_valid()) {
+    char *start = file_cache_for_read_ + thread_id * kMaxIndexFileSize;
+    char *end = start + kMaxIndexFileSize;
+    struct disk_index *ar = (struct disk_index*) start;
+    while (ar < (struct disk_index*)end) {
+      if (!(ar->is_valid())) {
         break;
       }
-      hash_.SetNoLock(di.get_key(), di.get_offset(), shard_locks);
+      hash_.SetNoLock(ar->get_key(), ar->get_offset(), shard_locks);
+      ar++;
     }
-    close(fd);
   };
 
   for (int i = 0; i < (int)kMaxThreadNumber; i++) {
     thread_list.emplace_back(std::thread(init_hash_per_thread, i));
   }
 
+  // reopen all the files. BUG: why?
   open_data_fd_read();
 
   for (auto &v: thread_list) {
     v.join();
   }
 
+  // to here, all the memory based on file_cache_for_read_
+  // would freed.
   if (shard_locks) {
     delete [] shard_locks;
   }
+
 }
 
 EngineRace::~EngineRace() {
@@ -300,11 +379,6 @@ EngineRace::~EngineRace() {
 
   // clean the data file direct IO opened files.
   close_data_fd();
-
-  // free the buffer alloc
-  if (hash_bucket_counter_) {
-    free(hash_bucket_counter_);
-  }
 
   end_ = std::chrono::system_clock::now();
   auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ - begin_);
@@ -329,8 +403,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   static thread_local struct disk_index di;
   static thread_local struct disk_index *mptr = nullptr;
   static thread_local int mptr_iter = 0;
-  static thread_local int hash_fd = -1;
-  static thread_local uint32_t *hash_mptr = nullptr;
 
   di.set_key(toInt(key));
   if (m_thread_id == 0xffff) {
@@ -346,17 +418,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     }
     mptr = reinterpret_cast<struct disk_index*>(ptr);
     memset(mptr, 0, kMaxIndexFileSize); // 12MB
-
-    // every thread has its own index file.
-    sprintf(path, "%sindex/%d_hash", file_name_.c_str(), m_thread_id);
-    hash_fd = open(path, O_RDWR | O_CREAT | O_NOATIME | O_TRUNC, 0644);
-    posix_fallocate(hash_fd, 0, kMaxHashFileSize);
-    ptr = mmap(NULL, kMaxHashFileSize, PROT_READ|PROT_WRITE, MAP_SHARED | MAP_POPULATE, hash_fd, 0);
-    if (ptr == MAP_FAILED) {
-      DEBUG << "map failed for index write\n";
-    }
-    hash_mptr = reinterpret_cast<uint32_t*>(ptr);
-    memset(hash_mptr, 0, kMaxHashFileSize);
   }
 
   // because there just 256 files.
@@ -372,8 +433,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
 
   // pointer operate the ptr.
   mptr[mptr_iter++] = di;
-
-  hash_mptr[di.get_key() >> 48]++;
   return kSucc;
 }
 
@@ -383,7 +442,6 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   // init the read map.
   static std::once_flag init_mptr;
   std::call_once (init_mptr, [this] {
-    build_hash_counter();
     stage_ = kReadStage; // Read
     thread_id_ = 0;
     BEGIN_POINT(begin_build_hash_table);
@@ -523,7 +581,7 @@ void EngineRace::ReadIndexEntry() {
       ask_to_visit_index();
       continue;
     }
-    read_aio.Prepare(read_pos, index_buf_, k24MB); // TODO: what would happen if there is not enough 4K?
+    read_aio.Prepare(read_pos, index_buf_, k24MB);
     read_aio.Submit();
     bytes = read_aio.WaitOver();
     read_pos += bytes;
@@ -535,10 +593,7 @@ void EngineRace::ReadIndexEntry() {
 void EngineRace::ReadDataEntry() {
   open_data_fd_range();
   // get the maxium file length.
-  int max_file_length = 0;
-  for (uint32_t i = 0; i < kThreadShardNumber; i++) {
-    max_file_length = std::max(max_file_length, data_fd_len_[i]);
-  }
+  int max_file_length = max_data_file_length();
 
   const uint64_t cache_size = max_file_length + kPageSize;
   char *current_buf = GetAlignedBuffer(cache_size);

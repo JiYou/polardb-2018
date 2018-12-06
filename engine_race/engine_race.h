@@ -154,8 +154,9 @@ struct aio_env_single {
   }
 
   RetCode Submit() {
-    if ((io_submit(ctx, kSingleRequest, &iocbs)) != kSingleRequest) {
-      DEBUG << "io_submit meet error, " << std::endl;;
+    int ret = 0;
+    if ((ret = io_submit(ctx, kSingleRequest, &iocbs)) != kSingleRequest) {
+      DEBUG << "io_submit meet error, ret = " << ret << std::endl;;
       return kIOError;
     }
     return kSucc;
@@ -192,6 +193,9 @@ class HashTreeTable {
   RetCode GetNoLock(uint64_t key, uint64_t *file_no, uint32_t *file_offset); // no_lock
   RetCode SetNoLock(uint64_t key, uint32_t file_offset, spinlock *ar); // no_lock
 
+  uint64_t Shard(uint64_t key) {
+    return key >> 48;
+  }
   // NOTE: no lock here.
   // after sort then begin to write into file.
   void Sort(const char *file_name);
@@ -436,21 +440,22 @@ class EngineRace : public Engine  {
   }
 
   void open_data_fd_read() {
-    if (has_open_data_fd_) {
-      close_data_fd();
-    }
-    char path[kPathLength];
-    const std::string data_dir = file_name_ + kDataDirName;
+    open_data_fd_range();
+  }
+
+  int max_data_file_length(int *iter=nullptr) {
+    int pos = 0;
+    int max_len = 0;
     for (int i = 0; i < (int)kThreadShardNumber; i++) {
-      sprintf(path, "%s/%d", data_dir.c_str(), i);
-      int fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT, 0644);
-      if (fd < 0) {
-        DEBUG << "open " << path << " meet error\n";
-        // DO not exit, may this file not exits.
+      if (max_len < data_fd_len_[i]) {
+        max_len = data_fd_len_[i];
+        pos = i;
       }
-      data_fd_[i] = fd;
     }
-    has_open_data_fd_ = true;
+    if (iter) {
+      *iter = pos;
+    }
+    return max_len;
   }
 
   void open_data_fd_range() {
@@ -464,8 +469,7 @@ class EngineRace : public Engine  {
       data_fd_len_[i] = get_file_length(path);
       int fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT, 0644);
       if (fd < 0) {
-        DEBUG << "open " << path << " meet error\n";
-        // DO not exit, may this file not exits.
+        /*DO not exit, may this file not exits. if just single thread*/;
       }
       data_fd_[i] = fd;
     }
@@ -484,6 +488,8 @@ class EngineRace : public Engine  {
       }
       data_fd_[i] = fd;
 
+      // deal with key == 0, and offset = 0.
+      // avoid this case.
       if (0 == i) {
         std::string str(kPageSize, '.');
         if (write(data_fd_[0], str.c_str(), kPageSize) != kPageSize) {
@@ -500,41 +506,8 @@ class EngineRace : public Engine  {
  private:
   void init_read();
   HashTreeTable hash_; // for the read index.
-  uint32_t *hash_bucket_counter_ = nullptr;
-  void build_hash_counter() {
-    // open all the hash_counte files
-    char path[kPathLength];
-    hash_bucket_counter_ = (uint32_t*) malloc(kMaxHashFileSize);
-    if (!hash_bucket_counter_) {
-      DEBUG << "malloc for hash_counter meet error\n";
-      exit(-1);
-    }
-
-    char *buf = GetAlignedBuffer(kMaxHashFileSize * kMaxThreadNumber); // 64KB * 64thread
-    struct aio_env_range<kMaxThreadNumber> read_aio;
-    read_aio.Clear();
-    for (int i = 0; i < (int)kMaxThreadNumber; i++) {
-      sprintf(path, "%sindex/%d_hash", file_name_.c_str(), i);
-      int fd = open(path, O_DIRECT | O_NOATIME | O_RDONLY, 0644);
-      if (fd < 0) {
-        // if it's single thread, the file maybe not exist.
-        continue;
-      }
-      read_aio.PrepareRead(fd, 0, buf + i * kMaxHashFileSize, kMaxHashFileSize);
-    }
-    read_aio.Submit();
-    read_aio.WaitOver();
-
-    memset(hash_bucket_counter_, 0, kMaxHashFileSize);
-    for (int i = 0; i < (int)kMaxThreadNumber; i++) {
-      uint32_t *single_thread_counter = reinterpret_cast<uint32_t*>(
-              buf + i * kMaxHashFileSize);
-      for (uint32_t j = 0; j < kMaxBucketSize; j++) {
-        hash_bucket_counter_[j] += single_thread_counter[j];
-      }
-    }
-    free(buf);
-  }
+  // pickup one file as file cache, speed up the read
+  char *file_cache_for_read_ = nullptr;
 
  // Range Stage
  // TODO here is just for 64 threads: call these threads visit-thread.
