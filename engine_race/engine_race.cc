@@ -596,7 +596,10 @@ void EngineRace::ReadDataEntry() {
   int max_file_length = max_data_file_length();
 
   const uint64_t cache_size = max_file_length + kPageSize;
-  char *current_buf = GetAlignedBuffer(cache_size);
+  char *current_buf = nullptr;
+  if (file_cache_for_read_) {
+    current_buf = file_cache_for_read_;
+  }
   char *next_buf = GetAlignedBuffer(cache_size);
   char *has_data_buf = nullptr;
   if (!current_buf || !next_buf) {
