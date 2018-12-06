@@ -116,7 +116,7 @@ void HashTreeTable::CacheSave(const char *file_name) {
 }
 
 void HashTreeTable::AioSaveInit(const char *file_name) {
-  all_index_fd_ = open(file_name, O_DIRECT | O_WRONLY | O_TRUNC | O_NOATIME, 0644);
+  all_index_fd_ = open(file_name, O_DIRECT | O_WRONLY | O_TRUNC | O_NOATIME | O_CREAT, 0644);
   posix_fallocate(all_index_fd_, 0, mem_size());
   if (all_index_fd_ < 0) {
     DEBUG << "open " << file_name << " meet error\n";
