@@ -71,7 +71,6 @@ RetCode HashTreeTable::GetNoLock(uint64_t key, uint64_t *file_no, uint32_t *file
 
 RetCode HashTreeTable::SetNoLock(uint64_t key, uint32_t file_offset, spinlock *ar) {
   const uint64_t array_pos = compute_pos(key);
-
   if (ar) {
     ar[array_pos].lock();
   }

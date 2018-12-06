@@ -213,6 +213,16 @@ class HashTreeTable {
   void Init(const uint32_t *hash_bucket_counter) {
     this->hash_bucket_counter_ = hash_bucket_counter;
 
+    total_item_ = 0;
+    for (int i = 0; i < (int)kMaxBucketSize; i++) {
+      total_item_ += hash_bucket_counter_[i];
+    }
+    hash_ = (struct disk_index*)GetAlignedBuffer(mem_size());
+    if (!hash_) {
+      DEBUG << "malloc memory for all the item failed\n";
+      exit(-1);
+    }
+
     const uint64_t alloc_size = sizeof(struct disk_index*) * (kMaxBucketSize+1);
     bucket_iter_ = (struct disk_index**) malloc (alloc_size);
     bucket_start_pos_ = (struct disk_index**) malloc(alloc_size);
@@ -229,16 +239,8 @@ class HashTreeTable {
     }
     bucket_start_pos_[kMaxBucketSize] = hash_ + total_item_;
 
-    if (total_item_ == 64000000ul) {
+    if (total_item_ == 64000000ull) {
       remove_dup_ = false;
-    }
-
-    // begin to malloc memory.
-    // can use aio to write the file
-    hash_ = (struct disk_index*)GetAlignedBuffer(mem_size());
-    if (!hash_) {
-      DEBUG << "malloc memory for all the item failed\n";
-      exit(-1);
     }
   }
 
