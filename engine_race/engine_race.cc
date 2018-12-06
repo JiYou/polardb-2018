@@ -44,7 +44,7 @@ uint32_t HashTreeTable::compute_pos(uint64_t x) {
 RetCode HashTreeTable::find(uint64_t key, struct disk_index**ptr) {
   auto bucket_id = compute_pos(key);
   auto &first = bucket_start_pos_[bucket_id];
-  auto &last = bucket_start_pos_[bucket_id + 1];
+  auto &last = bucket_iter_[bucket_id];
   auto pos = std::lower_bound(
     first, last,
     key, [](const disk_index &a, uint64_t b) {
@@ -111,9 +111,23 @@ void HashTreeTable::CacheSave(const char *file_name) {
     exit(-1);
   }
 
-  if (write(all_index_fd_, hash_, mem_size()) != (int)mem_size()) {
-    DEBUG << "write file meet error\n";
-    exit(-1);
+  // note: if all threads contains duplicated items
+  // after the item has been -covered,
+  // there maybe some holes in hash_
+  // so, need to write the item one by one.
+  for (uint32_t i = 0; i < kMaxBucketSize; i++) {
+    auto &first = bucket_start_pos_[i];
+    auto &last = bucket_iter_[i];
+
+    if (last == first) {
+      continue;
+    }
+
+    int write_size = (last - first) * sizeof(struct disk_index);
+    if (write(all_index_fd_, first, write_size) != write_size) {
+      DEBUG << "write file meet error\n";
+      exit(-1);
+    }
   }
   // close the file handler in WaitWriteOver.
 }
@@ -139,7 +153,7 @@ void HashTreeTable::Sort(const char *file_name) {
   auto sort_range = [this](const size_t begin, const size_t end) {
     for (size_t i = begin; i < end && i < kMaxBucketSize; i++) {
       auto first = bucket_start_pos_[i];
-      auto last = bucket_start_pos_[i+1];
+      auto last = bucket_iter_[i];
       std::sort(first, last);
     }
   };
