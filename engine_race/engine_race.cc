@@ -290,6 +290,8 @@ void EngineRace::init_read() {
     }
   }
   read_aio->~aio_env_range<kMaxThreadNumber>();
+  all_index_fd_array = nullptr;
+  read_aio = nullptr;
 
   // then begin to build the hash_bucket_counter_
   // this is the header for all the 64 threads
@@ -360,17 +362,22 @@ void EngineRace::init_read() {
     thread_list.emplace_back(std::thread(init_hash_per_thread, i));
   }
 
-
   for (auto &v: thread_list) {
     v.join();
   }
 
   // to here, all the memory based on file_cache_for_read_
-  // would freed.
+  // would free to use as cache.
+  struct aio_env_single max_file_aio(data_fd_[max_length_file_iter], true, false);
+  max_file_aio.Prepare(0, file_cache_for_read_, max_cache_size);
+  max_file_aio.Submit();
+
+  // do some job here.
   if (shard_locks) {
     delete [] shard_locks;
   }
-
+  max_file_aio.WaitOver();
+  cached_file_iter_ = max_length_file_iter;
 }
 
 EngineRace::~EngineRace() {
@@ -380,6 +387,11 @@ EngineRace::~EngineRace() {
 
   // clean the data file direct IO opened files.
   close_data_fd();
+
+  // free read memory
+  if (file_cache_for_read_) {
+    free(file_cache_for_read_);
+  }
 
   end_ = std::chrono::system_clock::now();
   auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end_ - begin_);
@@ -467,6 +479,12 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
 
   if (ret != kSucc) {
     return kNotFound;
+  }
+
+  if (data_fd_iter == cached_file_iter_ && file_cache_for_read_) {
+    char *buf = file_cache_for_read_ + file_offset;
+    value->assign(buf, kPageSize);
+    return kSucc;
   }
 
   // begin to find the key & pos

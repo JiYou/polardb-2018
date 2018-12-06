@@ -508,6 +508,7 @@ class EngineRace : public Engine  {
   HashTreeTable hash_; // for the read index.
   // pickup one file as file cache, speed up the read
   char *file_cache_for_read_ = nullptr;
+  uint32_t cached_file_iter_{0xffffffff};
 
  // Range Stage
  // TODO here is just for 64 threads: call these threads visit-thread.
