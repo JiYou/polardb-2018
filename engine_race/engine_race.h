@@ -196,17 +196,15 @@ class HashTreeTable {
   // after sort then begin to write into file.
   void Sort(const char *file_name);
   void WaitWriteOver() {
-    if (has_save_) {
-      if (write_aio_) {
-        write_aio_->WaitOver();
-        delete write_aio_;
-        write_aio_ = nullptr;
-        if (all_index_fd_ > 0) {
-          close(all_index_fd_);
-        }
-      }
+    if (write_aio_) {
+      write_aio_->WaitOver();
+      delete write_aio_;
+      write_aio_ = nullptr;
     }
-    has_save_ = false;
+    if (all_index_fd_ > 0) {
+      close(all_index_fd_);
+      all_index_fd_ = -1;
+    }
   }
 
  public:
@@ -268,6 +266,11 @@ class HashTreeTable {
   uint64_t mem_size() const {
     return total_item_ * sizeof(struct disk_index);
   }
+  // use buffered io to save hash
+  void CacheSave(const char *file_name);
+  // use O_DIRECT to save hash.
+  void AioSaveInit(const char *file_name);
+  void AioSaveSubmit();
  private:
   const uint32_t *hash_bucket_counter_ = nullptr;
   struct disk_index *hash_ = nullptr;
@@ -275,7 +278,6 @@ class HashTreeTable {
   struct disk_index **bucket_iter_ = nullptr;
   struct disk_index **bucket_start_pos_ = nullptr;
   bool remove_dup_ = true;
-  bool has_save_ = false;
   struct aio_env_single *write_aio_ = nullptr;
   int all_index_fd_ = -1;
  private:

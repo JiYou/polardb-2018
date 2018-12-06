@@ -101,6 +101,37 @@ RetCode HashTreeTable::SetNoLock(uint64_t key, uint32_t file_offset, spinlock *a
   return kSucc;
 }
 
+// if the mem_size is not aligned with kPageSize
+// use this to save the file.
+void HashTreeTable::CacheSave(const char *file_name) {
+  // Here juse O_NONBLOCK to write the content.
+  all_index_fd_ = open(file_name, O_WRONLY | O_TRUNC | O_CREAT | O_NOATIME | O_NONBLOCK, 0644);
+  if (all_index_fd_ < 0) {
+    DEBUG << "open " << file_name << " meet error\n";
+    exit(-1);
+  }
+
+  write(all_index_fd_, hash_, mem_size());
+  // close the file handler in WaitWriteOver.
+}
+
+void HashTreeTable::AioSaveInit(const char *file_name) {
+  all_index_fd_ = open(file_name, O_DIRECT | O_WRONLY | O_TRUNC | O_NOATIME, 0644);
+  posix_fallocate(all_index_fd_, 0, mem_size());
+  if (all_index_fd_ < 0) {
+    DEBUG << "open " << file_name << " meet error\n";
+    exit (-1);
+  }
+  write_aio_ = new aio_env_single(all_index_fd_, false/*write*/, false/*no_buf*/);
+}
+
+void HashTreeTable::AioSaveSubmit() {
+    // after sort, then raise write process.
+    write_aio_->Prepare(0, (char*)hash_, mem_size());
+    write_aio_->Submit();
+    // NOTE: wait_over would in destructor func.
+}
+
 void HashTreeTable::Sort(const char *file_name) {
   auto sort_range = [this](const size_t begin, const size_t end) {
     for (size_t i = begin; i < end && i < kMaxBucketSize; i++) {
@@ -119,23 +150,23 @@ void HashTreeTable::Sort(const char *file_name) {
     thread_list.emplace_back(std::thread(sort_range, begin, end));
   }
 
-  all_index_fd_ = open(file_name, O_DIRECT | O_WRONLY | O_TRUNC | O_NOATIME, 0644);
-  posix_fallocate(all_index_fd_, 0, mem_size());
-  if (all_index_fd_ < 0) {
-    DEBUG << "open " << file_name << " meet error\n";
-    exit (-1);
+  bool use_aio = true;
+  // if the total size is not aligned with kPageSize
+  // use bufferd IO to write the file content.
+  if (mem_size() % kPageSize) {
+    CacheSave(file_name);
+    use_aio = false;
+  } else {
+    AioSaveInit(file_name);
   }
-  write_aio_ = new aio_env_single(all_index_fd_, false/*write*/, false/*no_buf*/);
 
   for (auto &x: thread_list) {
     x.join();
   }
 
-  // after sort, then raise write process.
-  write_aio_->Prepare(0, (char*)hash_, mem_size());
-  write_aio_->Submit();
-  // NOTE: wait_over would in destructor func.
-  has_save_ = true;
+  if (use_aio) {
+    AioSaveSubmit();
+  }
 }
 
 //--------------------------------------------------------
@@ -477,7 +508,7 @@ void EngineRace::ReadIndexEntry() {
       ask_to_visit_index();
       continue;
     }
-    read_aio.Prepare(read_pos, index_buf_, k24MB);
+    read_aio.Prepare(read_pos, index_buf_, k24MB); // TODO: what would happen if there is not enough 4K?
     read_aio.Submit();
     bytes = read_aio.WaitOver();
     read_pos += bytes;
