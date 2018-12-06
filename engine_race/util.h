@@ -55,6 +55,7 @@ constexpr int64_t kNanoToMS = 1000000;
 constexpr uint32_t kMaxKeyLen = 8;
 constexpr uint32_t kMaxValueLen = 4096;
 constexpr size_t kMaxBucketSize = 65536; // 64K
+constexpr uint64_t kMaxHashFileSize = kMaxBucketSize * sizeof(uint32_t);
 constexpr int kSingleRequest = 1;
 constexpr int kMinNumber = 1;
 constexpr uint64_t kPageSize = 4096;

@@ -38,20 +38,20 @@ static const char kBigFileName[] = "DB";
 //---------------------------------------------------------
 
 uint32_t HashTreeTable::compute_pos(uint64_t x) {
-  // hash tree algorithm
-  //return (((((x % 17) * 19 + x % 19) * 23 + x % 23) * 29 + x % 29) * 31 + x % 31);
   return x >> 48;
 }
 
-RetCode HashTreeTable::find(std::vector<struct disk_index> &vs,
-                            uint64_t key,
-                            struct disk_index**ptr) {
-  auto pos = std::lower_bound(vs.begin(),
-    vs.end(), key, [](const disk_index &a, uint64_t b) {
+RetCode HashTreeTable::find(uint64_t key, struct disk_index**ptr) {
+  auto bucket_id = compute_pos(key);
+  auto &first = bucket_start_pos_[bucket_id];
+  auto &last = bucket_start_pos_[bucket_id + 1];
+  auto pos = std::lower_bound(
+    first, last,
+    key, [](const disk_index &a, uint64_t b) {
     return a.get_key() < b;
   });
   // has find.
-  if (pos != vs.end() && !(key < pos->get_key())) {
+  if (pos != last && !(key < pos->get_key())) {
     *ptr = &(*pos);
     return kSucc;
   }
@@ -59,11 +59,8 @@ RetCode HashTreeTable::find(std::vector<struct disk_index> &vs,
 }
 
 RetCode HashTreeTable::GetNoLock(uint64_t key, uint64_t *file_no, uint32_t *file_offset) {
-  const uint64_t array_pos = compute_pos(key);
-  // then begin to search this array.
-  auto &vs = hash_[array_pos];
   struct disk_index *ptr = nullptr;
-  auto ret = find(vs, key, &ptr);
+  auto ret = find(key, &ptr);
   if (ret == kNotFound) {
     return kNotFound;
   }
@@ -79,18 +76,25 @@ RetCode HashTreeTable::SetNoLock(uint64_t key, uint32_t file_offset, spinlock *a
     ar[array_pos].lock();
   }
 
-  auto &vs = hash_[array_pos];
-  for (auto &x: vs) {
-    if (static_cast<uint64_t>(x.get_key()) == key) {
-      x.set_offset(file_offset);
-      if (ar) {
-        ar[array_pos].unlock();
+  auto &last = bucket_iter_[array_pos];
+  if (remove_dup_) {
+    // try to find it, if find, then update the item..
+    auto &first = bucket_start_pos_[array_pos];
+    for (auto x = first; x < last; x++) {
+      if (static_cast<uint64_t>(x->get_key()) == key) {
+        x->set_offset(file_offset);
+       if (ar) {
+          ar[array_pos].unlock();
+        }
+        return kSucc;
       }
-      return kSucc;
     }
   }
+  // if not found, then just append.
+  last->set_key(key);
+  last->set_offset(file_offset);
+  last++;
 
-  vs.emplace_back(key, file_offset);
   if (ar) {
     ar[array_pos].unlock();
   }
@@ -98,91 +102,41 @@ RetCode HashTreeTable::SetNoLock(uint64_t key, uint32_t file_offset, spinlock *a
   return kSucc;
 }
 
-void HashTreeTable::Sort() {
+void HashTreeTable::Sort(const char *file_name) {
   auto sort_range = [this](const size_t begin, const size_t end) {
     for (size_t i = begin; i < end && i < kMaxBucketSize; i++) {
-      auto &vs = hash_[i];
-      std::sort(vs.begin(), vs.end());
+      auto first = bucket_start_pos_[i];
+      auto last = bucket_start_pos_[i+1];
+      std::sort(first, last);
     }
   };
 
   std::vector<std::thread> thread_list;
-  constexpr int segment_size = kMaxBucketSize / kMaxThreadNumber + 2;
+  constexpr int segment_size = kMaxBucketSize / kMaxThreadNumber +
+        (kMaxBucketSize % kMaxThreadNumber ? 1 : 0);
   for (int i = 0; i < kMaxThreadNumber; i++) {
     const size_t begin = i * segment_size;
     const size_t end = (i + 1) * segment_size;
     thread_list.emplace_back(std::thread(sort_range, begin, end));
   }
 
+  all_index_fd_ = open(file_name, O_DIRECT | O_WRONLY | O_TRUNC | O_NOATIME, 0644);
+  posix_fallocate(all_index_fd_, 0, mem_size());
+  if (all_index_fd_ < 0) {
+    DEBUG << "open " << file_name << " meet error\n";
+    exit (-1);
+  }
+  write_aio_ = new aio_env_single(all_index_fd_, false/*write*/, false/*no_buf*/);
+
   for (auto &x: thread_list) {
     x.join();
   }
-}
 
-void HashTreeTable::PrintMeanStdDev() {
-  std::vector<size_t> vs;
-  for (auto &shard: hash_) {
-    vs.push_back(shard.size());
-  }
-  double mean = 0, stdev = 0;
-  ComputeMeanSteDev(vs, &mean, &stdev);
-  DEBUG << "HashHard Stat: mean = " << mean
-        << " , " << "stdev = " << stdev << std::endl;
-}
-
-void HashTreeTable::Save(const char *file_name) {
-  BEGIN_POINT(begin_save_index);
-  int fd = open(file_name, O_WRONLY | O_CREAT | O_TRUNC | O_NONBLOCK | O_NOATIME, 0644);
-  if (fd < 0 ) {
-    DEBUG << "open " << file_name << "failed\n";
-    return;
-  }
-  // constexpr uint64_t write_buffer_size = k256MB;
-  // NOTE!! Big Bug
-  // if use 256, it can not devided by sizeof (struct disk_index)
-  // it would cause read-error.
-  // so, need to change to times of sizeof(struct disk_index)
-  // Because sizeof(struct disk_index) == 12,
-  // So, here uses 240MB
-  constexpr uint64_t write_buffer_size = sizeof(struct disk_index) * 1024ull * 1024ull * 20;
-  char *write_buffer = GetAlignedBuffer(write_buffer_size);
-  if (!write_buffer) {
-    DEBUG << "alloc memory for write_buffer failed\n";
-    return;
-  }
-  struct disk_index *di = (struct disk_index*) write_buffer;
-  int iter = 0;
-  const int total = write_buffer_size / sizeof(struct disk_index);
-  int kv_item_cnt = 0;
-
-  for (auto &vs: hash_) {
-    kv_item_cnt += vs.size();
-    if (!vs.empty()) {
-      for (auto &x: vs) {
-        if (iter == total) {
-          if (write(fd, write_buffer, write_buffer_size) != write_buffer_size) {
-            DEBUG << "write file " << file_name << " meet error\n";
-            return;
-          }
-          iter = 0;
-        }
-
-        di[iter++] = x;
-      }
-    }
-  }
-  DEBUG << "total kv_item_cnt = " << kv_item_cnt << std::endl;
-  if (iter) {
-    int write_size = iter * sizeof(struct disk_index);
-    if (write(fd, write_buffer, write_size) != write_size) {
-      DEBUG << "write file = " << file_name << " meet error\n";
-      exit(-1);
-    }
-  }
-  free(write_buffer);
-  close(fd);
-  DEBUG << "save all index to " << file_name << std::endl;
-  END_POINT(end_save_index, begin_save_index, "save_all_time_ms");
+  // after sort, then raise write process.
+  write_aio_->Prepare(0, (char*)hash_, mem_size());
+  write_aio_->Submit();
+  // NOTE: wait_over would in destructor func.
+  has_save_ = true;
 }
 
 //--------------------------------------------------------
@@ -245,7 +199,7 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
 
 // this is build up just for read.
 void EngineRace::init_read() {
-  hash_.Init();
+  hash_.Init(hash_bucket_counter_);
 
   std::vector<std::thread> thread_list(kMaxThreadNumber);
   thread_list.clear();
@@ -258,6 +212,7 @@ void EngineRace::init_read() {
 
   // just read the index files.
   // NOTE change the dir to test_engine/index/(0~~255)
+  // OPT: use aio to read all the index file.
   const std::string index_dir = file_name_ + kMetaDirName;
   auto init_hash_per_thread = [&](int thread_id) {
     // open the folder.
@@ -301,9 +256,9 @@ EngineRace::~EngineRace() {
   // clean the data file direct IO opened files.
   close_data_fd();
 
-  if (stage_ == kReadStage) {
-    // save all the kv into single file.
-    hash_.Save(AllIndexFile());
+  // free the buffer alloc
+  if (hash_bucket_counter_) {
+    free(hash_bucket_counter_);
   }
 
   end_ = std::chrono::system_clock::now();
@@ -329,6 +284,8 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   static thread_local struct disk_index di;
   static thread_local struct disk_index *mptr = nullptr;
   static thread_local int mptr_iter = 0;
+  static thread_local int hash_fd = -1;
+  static thread_local uint32_t *hash_mptr = nullptr;
 
   di.set_key(toInt(key));
   if (m_thread_id == 0xffff) {
@@ -344,6 +301,17 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     }
     mptr = reinterpret_cast<struct disk_index*>(ptr);
     memset(mptr, 0, kMaxIndexFileSize); // 12MB
+
+    // every thread has its own index file.
+    sprintf(path, "%sindex/%d_hash", file_name_.c_str(), m_thread_id);
+    hash_fd = open(path, O_RDWR | O_CREAT | O_NOATIME | O_TRUNC, 0644);
+    posix_fallocate(hash_fd, 0, kMaxHashFileSize);
+    ptr = mmap(NULL, kMaxHashFileSize, PROT_READ|PROT_WRITE, MAP_SHARED | MAP_POPULATE, hash_fd, 0);
+    if (ptr == MAP_FAILED) {
+      DEBUG << "map failed for index write\n";
+    }
+    hash_mptr = reinterpret_cast<uint32_t*>(ptr);
+    memset(hash_mptr, 0, kMaxHashFileSize);
   }
 
   // because there just 256 files.
@@ -359,6 +327,8 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
 
   // pointer operate the ptr.
   mptr[mptr_iter++] = di;
+
+  hash_mptr[di.get_key() >> 48]++;
   return kSucc;
 }
 
@@ -368,15 +338,12 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   // init the read map.
   static std::once_flag init_mptr;
   std::call_once (init_mptr, [this] {
+    build_hash_counter();
     stage_ = kReadStage; // Read
     thread_id_ = 0;
     BEGIN_POINT(begin_build_hash_table);
     init_read();
     END_POINT(end_build_hash_table, begin_build_hash_table, "init_read_time");
-
-    BEGIN_POINT(begin_sort_hash_table);
-    hash_.Sort();
-    END_POINT(end_sort_hash_table, begin_sort_hash_table, "hash_sort_time");
   });
 
   static thread_local uint64_t m_thread_id = 0xffff;
@@ -561,8 +528,7 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
     thread_id_ = 0;
     // do not wait for multi-input.
     if (stage_ == kReadStage) {
-      // save it to all file.
-      hash_.Save(AllIndexFile());
+      hash_.WaitWriteOver();
     } else {
       // start index-cache thread
       for (uint64_t i = 0; i < kMaxThreadNumber; i++) {

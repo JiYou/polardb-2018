@@ -105,44 +105,6 @@ class disk_index {
 };
 #pragma pack(pop)
 
-class HashTreeTable {
- public:
-  RetCode GetNoLock(uint64_t key, uint64_t *file_no, uint32_t *file_offset); // no_lock
-  RetCode SetNoLock(uint64_t key, uint32_t file_offset, spinlock *ar); // no_lock
-
-  // NOTE: no lock here. Do not call it anywhere.
-  // after load all the entries from disk,
-  // for speed up the lookup, need to sort it.
-  // after some set operations->append to the
-  // hash shard vector.
-  void Sort();
-
-  // print Hash Mean StdDev size of hash shard.
-  void PrintMeanStdDev();
-
-  // merge sucket sort and write all kv into single file.
-  void Save(const char *file_name);
-
- public:
-  void Init() {
-    hash_.resize(kMaxBucketSize);
-  }
-
-  HashTreeTable() { }
-  ~HashTreeTable() { }
-
- public:
-  HashTreeTable(const HashTreeTable &) = delete;
-  HashTreeTable(const HashTreeTable &&) = delete;
-  HashTreeTable &operator=(const HashTreeTable&) = delete;
-  HashTreeTable &operator=(const HashTreeTable&&) = delete;
- private:
-  std::vector<std::vector<struct disk_index>> hash_;
- private:
-  uint32_t compute_pos(uint64_t key);
-  RetCode find(std::vector<struct disk_index> &vs, uint64_t key, struct disk_index**ptr);
-};
-
 // aio just for read operations.
 struct aio_env_single {
   aio_env_single(int fd_=-1, bool read=true, bool alloc=true) {
@@ -222,6 +184,189 @@ struct aio_env_single {
   struct iocb iocb;
   struct iocb* iocbs;
   struct io_event events;
+  struct timespec timeout;
+};
+
+class HashTreeTable {
+ public:
+  RetCode GetNoLock(uint64_t key, uint64_t *file_no, uint32_t *file_offset); // no_lock
+  RetCode SetNoLock(uint64_t key, uint32_t file_offset, spinlock *ar); // no_lock
+
+  // NOTE: no lock here.
+  // after sort then begin to write into file.
+  void Sort(const char *file_name);
+  void WaitWriteOver() {
+    if (has_save_) {
+      if (write_aio_) {
+        write_aio_->WaitOver();
+        delete write_aio_;
+        write_aio_ = nullptr;
+        if (all_index_fd_ > 0) {
+          close(all_index_fd_);
+        }
+      }
+    }
+    has_save_ = false;
+  }
+
+ public:
+  void Init(const uint32_t *hash_bucket_counter) {
+    this->hash_bucket_counter_ = hash_bucket_counter;
+
+    const uint64_t alloc_size = sizeof(struct disk_index*) * (kMaxBucketSize+1);
+    bucket_iter_ = (struct disk_index**) malloc (alloc_size);
+    bucket_start_pos_ = (struct disk_index**) malloc(alloc_size);
+    if (!bucket_iter_ || !bucket_start_pos_) {
+      DEBUG << "alloc memory failed for bucket_iter bucket_start_pos\n";
+      exit(-1);
+    }
+
+    // get total number of items.
+    total_item_ = 0;
+    for (int i = 0; i < (int)kMaxBucketSize; i++) {
+      bucket_start_pos_[i] = bucket_iter_[i] = hash_ + total_item_;
+      total_item_ += hash_bucket_counter_[i];
+    }
+    bucket_start_pos_[kMaxBucketSize] = hash_ + total_item_;
+
+    if (total_item_ == 64000000ul) {
+      remove_dup_ = false;
+    }
+
+    // begin to malloc memory.
+    // can use aio to write the file
+    hash_ = (struct disk_index*)GetAlignedBuffer(mem_size());
+    if (!hash_) {
+      DEBUG << "malloc memory for all the item failed\n";
+      exit(-1);
+    }
+  }
+
+  HashTreeTable() { }
+  ~HashTreeTable() {
+    WaitWriteOver();
+    if (hash_) {
+      free(hash_);
+    }
+    if (bucket_iter_) {
+      free(bucket_iter_);
+    }
+    if (bucket_start_pos_) {
+      free(bucket_start_pos_);
+    }
+  }
+
+ public:
+  HashTreeTable(const HashTreeTable &) = delete;
+  HashTreeTable(const HashTreeTable &&) = delete;
+  HashTreeTable &operator=(const HashTreeTable&) = delete;
+  HashTreeTable &operator=(const HashTreeTable&&) = delete;
+ private:
+  uint64_t total_item_ = 0;
+  uint64_t mem_size() const {
+    return total_item_ * sizeof(struct disk_index);
+  }
+ private:
+  const uint32_t *hash_bucket_counter_ = nullptr;
+  struct disk_index *hash_ = nullptr;
+  // record the start position of every bucket.
+  struct disk_index **bucket_iter_ = nullptr;
+  struct disk_index **bucket_start_pos_ = nullptr;
+  bool remove_dup_ = true;
+  bool has_save_ = false;
+  struct aio_env_single *write_aio_ = nullptr;
+  int all_index_fd_ = -1;
+ private:
+  uint32_t compute_pos(uint64_t key);
+  RetCode find(uint64_t key, struct disk_index**ptr);
+};
+
+template<int numberOfEvent>
+struct aio_env_range {
+  aio_env_range() {
+    // prepare the io context.
+    memset(&ctx, 0, sizeof(ctx));
+    if (io_setup(numberOfEvent, &ctx) < 0) {
+      DEBUG << "Error in io_setup" << std::endl;
+    }
+
+    timeout.tv_sec = 0;
+    timeout.tv_nsec = 0;
+
+    memset(&iocb, 0, sizeof(iocb));
+    iocbs = (struct iocb**) malloc(sizeof(struct iocb*) * numberOfEvent);
+    for (int i = 0; i < numberOfEvent; i++) {
+      iocbs[i] = iocb + i;
+      iocb[i].aio_lio_opcode = IO_CMD_PREAD;
+      iocb[i].aio_reqprio = 0;
+      iocb[i].u.c.nbytes = kPageSize;
+      // iocb->u.c.offset = offset;
+      // iocb->aio_fildes = fd;
+      // iocb->u.c.buf = buf;
+    }
+  }
+
+  void PrepareRead(int fd, uint64_t offset, char *out, uint32_t size) {
+    // prepare the io
+    iocb[index].aio_fildes = fd;
+    iocb[index].u.c.offset = offset;
+    iocb[index].u.c.buf = out;
+    iocb[index].u.c.nbytes = size;
+    iocb[index].aio_lio_opcode = IO_CMD_PREAD;
+    index++;
+  }
+
+  void PrepareWrite(int fd, uint64_t offset, char *out, uint32_t size) {
+    iocb[index].aio_fildes = fd;
+    iocb[index].u.c.offset = offset;
+    iocb[index].u.c.buf = out;
+    iocb[index].u.c.nbytes = size;
+    iocb[index].aio_lio_opcode = IO_CMD_PWRITE;
+    index++;
+  }
+
+  void Clear() {
+    index = 0;
+  }
+
+  int Size() const {
+    return index;
+  }
+
+  bool Full() {
+    return index == numberOfEvent;
+  }
+
+  RetCode Submit() {
+    if ((io_submit(ctx, index, iocbs)) != index) {
+      DEBUG << "io_submit meet error, " << std::endl;;
+      printf("io_submit error\n");
+      return kIOError;
+    }
+    return kSucc;
+  }
+
+  void WaitOver() {
+    int write_over_cnt = 0;
+    while (write_over_cnt != index) {
+      constexpr int min_number = 1;
+      int num_events = io_getevents(ctx, min_number, index, events, &timeout);
+      write_over_cnt += num_events;
+    }
+  }
+
+  ~aio_env_range() {
+    free(iocbs);
+    io_destroy(ctx);
+  }
+
+  int fd = 0;
+  int index = 0;
+  io_context_t ctx;
+  struct iocb iocb[numberOfEvent];
+  // struct iocb* iocbs[numberOfEvent];
+  struct iocb** iocbs = nullptr;
+  struct io_event events[numberOfEvent];
   struct timespec timeout;
 };
 
@@ -351,6 +496,41 @@ class EngineRace : public Engine  {
  private:
   void init_read();
   HashTreeTable hash_; // for the read index.
+  uint32_t *hash_bucket_counter_ = nullptr;
+  void build_hash_counter() {
+    // open all the hash_counte files
+    char path[kPathLength];
+    hash_bucket_counter_ = (uint32_t*) malloc(kMaxHashFileSize);
+    if (!hash_bucket_counter_) {
+      DEBUG << "malloc for hash_counter meet error\n";
+      exit(-1);
+    }
+
+    char *buf = GetAlignedBuffer(kMaxHashFileSize * kMaxThreadNumber); // 64KB * 64thread
+    struct aio_env_range<kMaxThreadNumber> read_aio;
+    read_aio.Clear();
+    for (int i = 0; i < (int)kMaxThreadNumber; i++) {
+      sprintf(path, "%sindex/%d_hash", file_name_.c_str(), i);
+      int fd = open(path, O_DIRECT | O_NOATIME | O_RDONLY, 0644);
+      if (fd < 0) {
+        // if it's single thread, the file maybe not exist.
+        continue;
+      }
+      read_aio.PrepareRead(fd, 0, buf + i * kMaxHashFileSize, kMaxHashFileSize);
+    }
+    read_aio.Submit();
+    read_aio.WaitOver();
+
+    memset(hash_bucket_counter_, 0, kMaxHashFileSize);
+    for (int i = 0; i < (int)kMaxThreadNumber; i++) {
+      uint32_t *single_thread_counter = reinterpret_cast<uint32_t*>(
+              buf + i * kMaxHashFileSize);
+      for (uint32_t j = 0; j < kMaxBucketSize; j++) {
+        hash_bucket_counter_[j] += single_thread_counter[j];
+      }
+    }
+    free(buf);
+  }
 
  // Range Stage
  // TODO here is just for 64 threads: call these threads visit-thread.
