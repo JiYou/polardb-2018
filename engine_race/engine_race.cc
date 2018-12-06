@@ -539,7 +539,6 @@ void EngineRace::ReadDataEntry() {
 
   struct aio_env_single read_aio(-1, true/*read*/, false/*no_buf*/);
   auto read_next_buf = [&](int file_no) {
-    DEBUG << " reading file = " << file_no << std::endl;
     read_aio.SetFD(data_fd_[file_no]);
     has_data_buf = next_buf;
     read_aio.Prepare(0, next_buf, data_fd_len_[file_no]);
