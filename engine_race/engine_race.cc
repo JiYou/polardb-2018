@@ -599,6 +599,8 @@ void EngineRace::ReadDataEntry() {
   char *current_buf = nullptr;
   if (file_cache_for_read_) {
     current_buf = file_cache_for_read_;
+  } else {
+    current_buf = GetAlignedBuffer(cache_size);
   }
   char *next_buf = GetAlignedBuffer(cache_size);
   char *has_data_buf = nullptr;
