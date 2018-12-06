@@ -262,31 +262,34 @@ void EngineRace::init_read() {
   }
 
   // read all the file out and into file buffer.
-  struct aio_env_range<kThreadShardNumber> read_aio;
-  read_aio.Clear();
-  int all_index_fd[kMaxThreadNumber];
+  int *all_index_fd_array = (int*)(file_cache_for_read_ +\
+      kMaxThreadNumber * kMaxIndexFileSize + kPageSize);
+  struct aio_env_range<kMaxThreadNumber> *read_aio = \
+      new (all_index_fd_array+kMaxThreadNumber) aio_env_range<kMaxThreadNumber>();
+  read_aio->Clear();
   const std::string index_dir = file_name_ + kMetaDirName;
   char path[kPathLength];
-  for (int i = 0; i < kMaxThreadNumber; i++) {
+  for (int i = 0; i < (int)kMaxThreadNumber; i++) {
     sprintf(path, "%s/%d", index_dir.c_str(), i);
     auto fd = open(path, O_RDONLY | O_NOATIME | O_DIRECT, 0644);
     if (fd < 0) {
       /*is there is just single thread, skip this failed*/;
       continue;
     }
-    all_index_fd[i] = fd;
+    all_index_fd_array[i] = fd;
     char *buf = file_cache_for_read_ + i * kMaxIndexFileSize;
-    read_aio.PrepareRead(fd, 0, buf, kMaxIndexFileSize);
+    read_aio->PrepareRead(fd, 0, buf, kMaxIndexFileSize);
   }
-  read_aio.Submit();
-  read_aio.WaitOver();
+  read_aio->Submit();
+  read_aio->WaitOver();
 
   // after all is read over.
   for (int i = 0; i < kMaxThreadNumber; i++) {
-    if (all_index_fd[i] > 0) {
-      close(all_index_fd[i]);
+    if (all_index_fd_array[i] > 0) {
+      close(all_index_fd_array[i]);
     }
   }
+  read_aio->~aio_env_range<kMaxThreadNumber>();
 
   // then begin to build the hash_bucket_counter_
   // this is the header for all the 64 threads
@@ -357,8 +360,6 @@ void EngineRace::init_read() {
     thread_list.emplace_back(std::thread(init_hash_per_thread, i));
   }
 
-  // reopen all the files. BUG: why?
-  open_data_fd_read();
 
   for (auto &v: thread_list) {
     v.join();
