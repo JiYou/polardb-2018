@@ -111,7 +111,10 @@ void HashTreeTable::CacheSave(const char *file_name) {
     exit(-1);
   }
 
-  write(all_index_fd_, hash_, mem_size());
+  if (write(all_index_fd_, hash_, mem_size()) != (int)mem_size()) {
+    DEBUG << "write file meet error\n";
+    exit(-1);
+  }
   // close the file handler in WaitWriteOver.
 }
 
