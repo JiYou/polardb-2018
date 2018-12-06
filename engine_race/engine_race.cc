@@ -168,9 +168,7 @@ void HashTreeTable::Sort(const char *file_name) {
   }
 
   bool use_aio = true;
-  // if the total size is not aligned with kPageSize
-  // use bufferd IO to write the file content.
-  if (mem_size() % kPageSize) {
+  if (remove_dup_) {
     CacheSave(file_name);
     use_aio = false;
   } else {
