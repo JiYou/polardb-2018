@@ -343,6 +343,10 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
     BEGIN_POINT(begin_build_hash_table);
     init_read();
     END_POINT(end_build_hash_table, begin_build_hash_table, "init_read_time");
+
+    BEGIN_POINT(begin_sort_hash_table);
+    hash_.Sort(AllIndexFile());
+    END_POINT(end_sort_hash_table, begin_sort_hash_table, "sort_time");
   });
 
   static thread_local uint64_t m_thread_id = 0xffff;
