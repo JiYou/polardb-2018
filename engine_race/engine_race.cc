@@ -586,8 +586,8 @@ void EngineRace::ReadIndexEntry() {
   // NOTE: must be times  of sizeof(struct disk_index);
   // 24MB here.
   // Other values such as 4K can not be deviced by 12, would cause bug.
-  constexpr uint64_t k24MB = 1024ull * 1024ull * sizeof(struct disk_index) * 2;
-  index_buf_ = GetAlignedBuffer(k24MB);
+  constexpr uint64_t kReadIndexMaxSize = 1024ull * 1024ull * sizeof(struct disk_index) * 2 * 3; // 72MB
+  index_buf_ = GetAlignedBuffer(kReadIndexMaxSize);
   struct aio_env_single read_aio(index_fd, true, false);
   while (true) {
     int bytes = 0;
@@ -600,7 +600,7 @@ void EngineRace::ReadIndexEntry() {
       ask_to_visit_index();
       continue;
     }
-    read_aio.Prepare(read_pos, index_buf_, k24MB);
+    read_aio.Prepare(read_pos, index_buf_, kReadIndexMaxSize);
     read_aio.Submit();
     bytes = read_aio.WaitOver();
     read_pos += bytes;
