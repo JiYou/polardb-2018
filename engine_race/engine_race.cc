@@ -402,10 +402,8 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   static std::once_flag init_write;
   std::call_once (init_write, [this] {
     stage_ = kWriteStage;
-    write_lock_ = new spinlock[kThreadShardNumber];
-    if (!write_lock_) {
-      DEBUG << "new write_lock_ failed\n";
-      exit (-1);
+    for (uint32_t i = 0; i < kThreadShardNumber; i++) {
+      data_fd_len_[i] = 0;
     }
     open_data_fd_write();
   });
@@ -435,14 +433,11 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
 
   // because there just 256 files.
   auto data_fd_iter = di.get_file_number();
-
-  write_lock_[data_fd_iter].lock();
-  di.set_offset(data_fd_len_[data_fd_iter]);
-  if (write(data_fd_[data_fd_iter], value.data(), kPageSize) != kPageSize) {
+  uint32_t offset = data_fd_len_[data_fd_iter]++;
+  di.set_offset(offset << 12);
+  if (pwrite(data_fd_[data_fd_iter], value.data(), kPageSize, offset << 12) != kPageSize) {
     return kIOError;
   }
-  data_fd_len_[data_fd_iter] += kPageSize;
-  write_lock_[data_fd_iter].unlock();
 
   // pointer operate the ptr.
   mptr[mptr_iter++] = di;

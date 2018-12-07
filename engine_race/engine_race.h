@@ -425,7 +425,7 @@ class EngineRace : public Engine  {
   bool has_open_data_fd_ = false;
   int data_fd_[kThreadShardNumber] = {-1};
   // in the write process the initial value is set to 0.
-  int data_fd_len_[kThreadShardNumber] = {0};
+  std::atomic<uint32_t> data_fd_len_[kThreadShardNumber];
   spinlock *write_lock_ = nullptr;
   void close_data_fd() {
     if (!has_open_data_fd_) {
@@ -447,7 +447,7 @@ class EngineRace : public Engine  {
     int pos = 0;
     int max_len = 0;
     for (int i = 0; i < (int)kThreadShardNumber; i++) {
-      if (max_len < data_fd_len_[i]) {
+      if (max_len < (int)data_fd_len_[i]) {
         max_len = data_fd_len_[i];
         pos = i;
       }
