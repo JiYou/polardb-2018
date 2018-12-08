@@ -402,9 +402,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   static std::once_flag init_write;
   std::call_once (init_write, [this] {
     stage_ = kWriteStage;
-    for (uint32_t i = 0; i < kThreadShardNumber; i++) {
-      data_fd_len_[i] = 0;
-    }
     open_data_fd_write();
   });
 
@@ -433,7 +430,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
 
   // because there just 256 files.
   auto data_fd_iter = di.get_file_number();
-  uint32_t offset = data_fd_len_[data_fd_iter]++;
+  uint32_t offset = data_fd_write_len_[data_fd_iter]++;
   di.set_offset(offset << 12);
   if (pwrite(data_fd_[data_fd_iter], value.data(), kPageSize, offset << 12) != kPageSize) {
     return kIOError;

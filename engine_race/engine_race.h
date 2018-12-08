@@ -424,8 +424,12 @@ class EngineRace : public Engine  {
   // for write/read/range
   bool has_open_data_fd_ = false;
   int data_fd_[kThreadShardNumber] = {-1};
+
   // in the write process the initial value is set to 0.
-  std::atomic<uint32_t> data_fd_len_[kThreadShardNumber];
+  // one std::atomic<uint32_t> takes 4 bytes.
+  std::atomic<uint32_t> *data_fd_write_len_ = nullptr;
+  uint32_t data_fd_len_[kThreadShardNumber];
+
   spinlock *write_lock_ = nullptr;
   void close_data_fd() {
     if (!has_open_data_fd_) {
@@ -477,6 +481,7 @@ class EngineRace : public Engine  {
   }
 
   void open_data_fd_write() {
+    data_fd_write_len_ = new (data_fd_len_) std::atomic<uint32_t>[kThreadShardNumber];
     char path[kPathLength];
     const std::string data_dir = file_name_ + kDataDirName;
     for (int i = 0; i < (int)kThreadShardNumber; i++) {
@@ -496,7 +501,9 @@ class EngineRace : public Engine  {
           DEBUG << "write file 0 first 4K meet error\n";
           exit(-1);
         }
-        data_fd_len_[0] = kPageSize;
+        data_fd_write_len_[0] = 1;
+      } else {
+        data_fd_write_len_[i] = 0;
       }
     }
     has_open_data_fd_ = true;
