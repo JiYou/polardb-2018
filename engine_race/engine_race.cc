@@ -207,33 +207,21 @@ RetCode EngineRace::Open(const std::string& name, Engine** eptr) {
   engine_race->begin_ = std::chrono::system_clock::now();
 
   std::atomic<bool> meet_error{false};
+  printf("[DB_DIR] = %s\n", name.c_str());
+
   engine_race->file_name_ = name + "/";
   engine_race->all_index_file_ = name + "/ALL";
-  // create the dir.
-  if (!FileExists(name)) {
-    if (mkdir(name.c_str(), 0755)) {
-      DEBUG << "mkdir " << name << " failed "  << std::endl;
-      return kIOError;
-    }
-  }
+  mkdir(name.c_str(), 0755);
+
   // create index/data dir.
   std::string index_dir = engine_race->file_name_ + kMetaDirName;
   mkdir(index_dir.c_str(), 0755);
   std::string data_dir = engine_race->file_name_ + kDataDirName;
   mkdir(data_dir.c_str(), 0755);
 
-  auto creat_lock_file = [&]() {
-    if (0 != LockFile(name + "/" + kLockFile, &(engine_race->db_lock_))) {
-      meet_error = true;
-      DEBUG << "Generate LOCK file failed" << std::endl;
-    }
-  };
-  std::thread thd_creat_lock_file(creat_lock_file);
-
-  thd_creat_lock_file.join();
-  if (meet_error) {
-    delete engine_race;
-    return kIOError;
+  if (0 != LockFile(name + "/" + kLockFile, &(engine_race->db_lock_))) {
+    meet_error = true;
+    DEBUG << "Generate LOCK file failed" << std::endl;
   }
 
   engine_race->max_cpu_cnt_ = std::thread::hardware_concurrency();
