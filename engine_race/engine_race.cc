@@ -402,8 +402,7 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   struct disk_index di;
   di.set_key(bswap_64(*reinterpret_cast<const uint64_t*>(key.data())));
   if (unlikely(m_thread_id == 0xffff)) {
-//    m_thread_id = pin_cpu();
-    m_thread_id = thread_id_++;
+    m_thread_id = pin_cpu();
     sprintf(path, "%sindex/%d", file_name_.c_str(), m_thread_id);
     index_fd = open(path, O_RDWR | O_CREAT | O_NOATIME | O_TRUNC, 0644);
     posix_fallocate(index_fd, 0, kMaxIndexFileSize); // 12MB
@@ -655,8 +654,7 @@ RetCode EngineRace::Range(const PolarString& lower, const PolarString& upper, Vi
 
   static thread_local uint64_t m_thread_id = 0xffff;
   if (m_thread_id == 0xffff) {
-    // m_thread_id = pin_cpu();
-    m_thread_id = thread_id_++;
+    m_thread_id = pin_cpu();
   }
 
   // here must deal with 64 threads.

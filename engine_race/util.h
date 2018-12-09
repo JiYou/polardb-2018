@@ -53,6 +53,8 @@ namespace polar_race {
 static const std::string kMetaDirName = "index";
 static const std::string kDataDirName = "data";
 
+constexpr size_t kCacheLineSize = 128;
+
 constexpr int64_t kNanoToMS = 1000000;
 constexpr uint32_t kMaxKeyLen = 8;
 constexpr uint32_t kMaxValueLen = 4096;
