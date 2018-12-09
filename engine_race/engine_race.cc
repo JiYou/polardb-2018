@@ -413,7 +413,6 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
       DEBUG << "map failed for index write\n";
     }
     mptr = reinterpret_cast<struct disk_index*>(ptr);
-    memset(mptr, 0, kMaxIndexFileSize); // 12MB
   }
 
   // because there just 256 files.

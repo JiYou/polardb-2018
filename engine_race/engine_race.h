@@ -492,20 +492,9 @@ class EngineRace : public Engine  {
         // DO not exit, may this file not exits.
       }
       data_fd_[i] = fd;
-
-      // deal with key == 0, and offset = 0.
-      // avoid this case.
-      if (0 == i) {
-        std::string str(kPageSize, '.');
-        if (write(data_fd_[0], str.c_str(), kPageSize) != kPageSize) {
-          DEBUG << "write file 0 first 4K meet error\n";
-          exit(-1);
-        }
-        data_fd_write_len_[0] = 1;
-      } else {
-        data_fd_write_len_[i] = 0;
-      }
+      data_fd_write_len_[i] = 0;
     }
+    data_fd_write_len_[0] = 1;
     has_open_data_fd_ = true;
   }
 
