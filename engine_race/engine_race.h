@@ -608,7 +608,7 @@ class EngineRace : public Engine  {
   uint64_t max_cpu_cnt_ = 0;
   // tag for the thread id,
   // just increase.
-  std::atomic<uint64_t> thread_id_{0};
+  alignas(kCacheLineSize) std::atomic<uint64_t> thread_id_{0};
 
   // time counter
   decltype(std::chrono::system_clock::now()) begin_;

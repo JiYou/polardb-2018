@@ -393,18 +393,17 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
     open_data_fd_write();
   });
 
-  static thread_local int m_thread_id = 0xffff;
-  static thread_local char path[kPathLength];
-  static thread_local int index_fd = -1;
-  static thread_local struct disk_index *mptr = nullptr;
-  static thread_local int mptr_iter = 0;
+  alignas(kCacheLineSize) static thread_local  int m_thread_id = 0xffff;
+  alignas(kCacheLineSize) static thread_local  struct disk_index *mptr = nullptr;
+  alignas(kCacheLineSize) static thread_local  int mptr_iter = 0;
 
   struct disk_index di;
   di.set_key(bswap_64(*reinterpret_cast<const uint64_t*>(key.data())));
   if (unlikely(m_thread_id == 0xffff)) {
     m_thread_id = pin_cpu();
+    char path[64];
     sprintf(path, "%sindex/%d", file_name_.c_str(), m_thread_id);
-    index_fd = open(path, O_RDWR | O_CREAT | O_NOATIME | O_TRUNC, 0644);
+    int index_fd = open(path, O_RDWR | O_CREAT | O_NOATIME | O_TRUNC, 0644);
     posix_fallocate(index_fd, 0, kMaxIndexFileSize); // 12MB
     mptr = (struct disk_index*)mmap(NULL,
         kMaxIndexFileSize, PROT_READ|PROT_WRITE, MAP_SHARED | MAP_POPULATE, index_fd, 0);
