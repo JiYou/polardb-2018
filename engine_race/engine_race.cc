@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/mman.h>
+#include <byteswap.h>
 
 #include <functional>
 #include <queue>
@@ -395,34 +396,25 @@ RetCode EngineRace::Write(const PolarString& key, const PolarString& value) {
   static thread_local int m_thread_id = 0xffff;
   static thread_local char path[kPathLength];
   static thread_local int index_fd = -1;
-  static thread_local struct disk_index di;
   static thread_local struct disk_index *mptr = nullptr;
   static thread_local int mptr_iter = 0;
 
-  di.set_key(toInt(key));
-  if (m_thread_id == 0xffff) {
+  struct disk_index di;
+  di.set_key(bswap_64(*reinterpret_cast<const uint64_t*>(key.data())));
+  if (unlikely(m_thread_id == 0xffff)) {
     m_thread_id = pin_cpu();
-    // every thread has its own index file.
     sprintf(path, "%sindex/%d", file_name_.c_str(), m_thread_id);
     index_fd = open(path, O_RDWR | O_CREAT | O_NOATIME | O_TRUNC, 0644);
     posix_fallocate(index_fd, 0, kMaxIndexFileSize); // 12MB
-
-    auto ptr = mmap(NULL, kMaxIndexFileSize, PROT_READ|PROT_WRITE, MAP_SHARED | MAP_POPULATE, index_fd, 0);
-    if (ptr == MAP_FAILED) {
-      DEBUG << "map failed for index write\n";
-    }
-    mptr = reinterpret_cast<struct disk_index*>(ptr);
+    mptr = (struct disk_index*)mmap(NULL,
+        kMaxIndexFileSize, PROT_READ|PROT_WRITE, MAP_SHARED | MAP_POPULATE, index_fd, 0);
   }
 
   // because there just 256 files.
   auto data_fd_iter = di.get_file_number();
   uint32_t offset = data_fd_write_len_[data_fd_iter]++;
   di.set_offset(offset << 12);
-  if (pwrite(data_fd_[data_fd_iter], value.data(), kPageSize, offset << 12) != kPageSize) {
-    return kIOError;
-  }
-
-  // pointer operate the ptr.
+  pwrite(data_fd_[data_fd_iter], value.data(), kPageSize, offset << 12);
   mptr[mptr_iter++] = di;
   return kSucc;
 }
