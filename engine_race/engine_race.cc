@@ -3,7 +3,6 @@
 #include "util.h"
 #include "engine_race.h"
 #include "engine_aio.h"
-#include "engine_hash.h"
 
 #include <pthread.h>
 #include <assert.h>
