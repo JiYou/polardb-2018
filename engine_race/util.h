@@ -1,5 +1,4 @@
 // Copyright [2018] Alibaba Cloud All rights reserved
-#undef NDEBUG
 #ifndef ENGINE_SIMPLE_UTIL_H_
 #define ENGINE_SIMPLE_UTIL_H_
 
