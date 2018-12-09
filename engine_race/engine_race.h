@@ -36,6 +36,10 @@
 
 namespace polar_race {
 
+struct alignas(kCacheLineSize) atomic_len {
+  std::atomic<uint32_t> len{0};
+};
+
 #pragma pack(push, 1)
 // try to just use 256 files.
 // the file number is from [0, 256)
@@ -427,7 +431,7 @@ class EngineRace : public Engine  {
 
   // in the write process the initial value is set to 0.
   // one std::atomic<uint32_t> takes 4 bytes.
-  std::atomic<uint32_t> *data_fd_write_len_ = nullptr;
+  atomic_len data_fd_write_len_[kThreadShardNumber];
   uint32_t data_fd_len_[kThreadShardNumber];
 
   spinlock *write_lock_ = nullptr;
@@ -481,7 +485,6 @@ class EngineRace : public Engine  {
   }
 
   void open_data_fd_write() {
-    data_fd_write_len_ = new (data_fd_len_) std::atomic<uint32_t>[kThreadShardNumber];
     char path[kPathLength];
     const std::string data_dir = file_name_ + kDataDirName;
     for (int i = 0; i < (int)kThreadShardNumber; i++) {
@@ -492,9 +495,9 @@ class EngineRace : public Engine  {
         // DO not exit, may this file not exits.
       }
       data_fd_[i] = fd;
-      data_fd_write_len_[i] = 0;
+      data_fd_write_len_[i].len = 0;
     }
-    data_fd_write_len_[0] = 1;
+    data_fd_write_len_[0].len = 1;
     has_open_data_fd_ = true;
   }
 
