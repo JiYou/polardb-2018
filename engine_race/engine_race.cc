@@ -436,22 +436,20 @@ RetCode EngineRace::Read(const PolarString& key, std::string* value) {
   });
 
   static thread_local uint64_t m_thread_id = 0xffff;
-  if (m_thread_id == 0xffff) {
+  if (unlikely(m_thread_id == 0xffff)) {
     // m_thread_id = pin_cpu();
     m_thread_id = thread_id_++;
   }
 
   static thread_local struct aio_env_single read_aio(-1, true/*read*/, true/*buf*/);
-  uint64_t data_fd_iter = 0;
   uint32_t file_offset = 0;
-  uint64_t k64 = toInt(key);
+  uint64_t k64 = bswap_64(*reinterpret_cast<const uint64_t*>(key.data()));
+  uint64_t data_fd_iter = k64 >> 56;
   auto ret = hash_.GetNoLock(k64, &data_fd_iter, &file_offset);
-
-  if (ret != kSucc) {
+  if (unlikely(ret != kSucc)) {
     return kNotFound;
   }
-
-  if (data_fd_iter == cached_file_iter_ && file_cache_for_read_) {
+  if (unlikely(data_fd_iter == cached_file_iter_ && file_cache_for_read_)) {
     char *buf = file_cache_for_read_ + file_offset;
     value->assign(buf, kPageSize);
     return kSucc;
