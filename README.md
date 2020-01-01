@@ -1,3 +1,5 @@
+PolarDB Race 2018
+
 ## All you have to do:
 
 Complete engine_race/engine_race.[h,cc], and execute
