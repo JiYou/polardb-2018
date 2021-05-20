@@ -167,11 +167,29 @@ struct aio_env_single {
   }
 
   unsigned long WaitOver() {
-    // after submit, need to wait all read over.
-    while (io_getevents(ctx, kSingleRequest, kSingleRequest,
-                        &events, &(timeout)) != kSingleRequest) {
-      /**/
-    }
+    int done_io_cnt = 0;
+    do {
+      int r = io_getevents(ctx, kSingleRequest, kSingleRequest,
+                        &events, &(timeout)) != kSingleRequest);
+      if (r > 0) {
+        done_io_cnt += r;
+      } else if (r == EFAULT) {
+        fprintf(stderr, "Either events or timeout is an invalid pointer.\n");
+        return -1;
+      } else if (r == EINTR) {
+        fprintf(stderr, "Interrupted by a signal handler\n");
+        return -1;
+      } else if (r == EINVAL) {
+        fprintf(stderr, "ctx_id is invalid.  min_nr is"
+                        " out of range or nr is out of range.\n");
+        return -1;
+      } else if (r == ENOSYS) {
+        fprintf(stderr, "io_getevents() is not implemented"
+                        "on this architecture.\n");
+        return -1;
+      }
+    } while (done_io_cnt < kSingleRequest);
+
     return events.res;
   }
 

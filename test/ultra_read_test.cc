@@ -110,7 +110,7 @@ int main(int argc, char **argv) {
     memset(buf, 0, op_size);
 
     // read once
-    aio.Prepare(0, buf, op_size);
+    aio.Prepare(0/*read/write_pos*/, buf, op_size);
     aio.Submit();
 
     auto ret = aio.WaitOver();
