@@ -35,6 +35,7 @@ exit_with_help()
          "         the size must be %d aligned\n"
          "-v size: overlapped size(bytes) with previous write/read\n"
          "         the size must be %d bytes aligned\n"
+         "-t time: run how many seconds\n"
          "example:\n"
          "    ./ultra_disk_test -r -l 4096 -v %d /dev/sdd\n"
          "    ./ultra_disk_test -w -l 4096 -v 4096 /dev/sdd\n",
@@ -159,6 +160,7 @@ main(int argc, char** argv)
   int op_type = -1;
   int op_size = -1;
   int overlap_size = 0;
+  int run_time = 120;
 
   // parse options
   for (int i = 1; i < argc; i++) {
@@ -199,6 +201,14 @@ main(int argc, char** argv)
           exit_with_help();
         }
         break;
+      case 't':
+        i++;
+        run_time = stoi(argv[i]);
+        if (run_time > 100) {
+          fprintf(stderr, "run too long time = %d\n", run_time);
+          exit_with_help();
+        }
+        break;
       default:
         exit_with_help();
         break;
@@ -226,6 +236,7 @@ main(int argc, char** argv)
   }
 
   disk_size = disk_size & (~(kBlockSize - 1));
+  std::cout << "disk_size = " << disk_size << std::endl;
 
   int fd = open(disk_path, O_RDWR | O_NOATIME | O_DIRECT | O_SYNC, 0644);
   if (fd == -1) {
@@ -240,24 +251,37 @@ main(int argc, char** argv)
   char* buf = polar_race::GetAlignedBuffer(op_size);
   memset(buf, 0, op_size);
 
-  auto start_submit_time = std::chrono::system_clock::now();
-  aio.Prepare(0 /*read/write_pos*/, buf, op_size);
-  aio.Submit();
-  auto start_commit_time = std::chrono::system_clock::now();
-  auto ret = aio.WaitOver();
-  auto end_commit_time = std::chrono::system_clock::now();
-
-  auto get_diff_ns = [](const decltype(start_submit_time)& start,
-                        const decltype(end_commit_time) end) {
+  auto start_time = std::chrono::system_clock::now();
+  auto get_diff_ns = [](const decltype(start_time)& start,
+                        const decltype(start_time) end) {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
     // 1,000 nanoseconds – one microsecond
     // 1,000 microseconds - one ms
   };
 
-  std::cout << get_diff_ns(start_commit_time, end_commit_time).count()
-            << std::endl;
+  uint64_t time_cost = 0;
+  uint64_t io_cnt = 0;
 
-  printf("read size = %d\n", ret);
+  while (true) {
+    auto start_submit_time = std::chrono::system_clock::now();
+    aio.Prepare(0 /*read/write_pos*/, buf, op_size);
+    aio.Submit();
+    auto start_commit_time = std::chrono::system_clock::now();
+    auto ret = aio.WaitOver();
+    auto end_commit_time = std::chrono::system_clock::now();
+
+    time_cost = get_diff_ns(start_time,
+                            end_commit_time).count();
+    io_cnt++;
+
+    double ts = get_diff_ns(start_submit_time, end_commit_time).count() / 1000;
+    printf("%.4lf ms\n", ts / 1000);
+    if (time_cost > run_time *1000 * 1000 * 100) {
+      break;
+    }
+  }
+
+  std::cout << "io_cnt = " << io_cnt << " : " << time_cost << std::endl;
 
   close(fd);
 
