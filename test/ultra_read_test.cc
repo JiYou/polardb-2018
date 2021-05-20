@@ -103,8 +103,15 @@ int main(int argc, char **argv) {
     }
 
     bool is_read = op_type == kReadOp;
-    struct aio_env_single read_aio(fd, is_read, false/*no_alloc*/);
+    struct aio_env_single aio(fd, is_read, false/*no_alloc*/);
 
+    // setup buffer
+    char *buf = polar_race::GetAlignedBuffer(op_size);
+
+    // read once
+    aio.Prepare(0, buf, op_size);
+    aio.Submit();
+    aio.WaitOver();
 
     close(fd);
 
