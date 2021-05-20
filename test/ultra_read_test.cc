@@ -4,6 +4,7 @@
 #include <bits/stdc++.h>
 
 using namespace std;
+using namespace polar_race;
 
 enum {
   kReadOp = 1,
