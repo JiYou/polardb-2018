@@ -15,7 +15,8 @@ using namespace polar_race;
 
 int main(void) {
   constexpr int size = 1000000;
-  spsc_queue<int> q(size/1000+10);
+  using spsc_queue = SPSCQueue<int>;
+  spsc_queue q(size/1000+10);
 
   std::atomic<bool> flag{false};
 
