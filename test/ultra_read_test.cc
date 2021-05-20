@@ -112,7 +112,9 @@ int main(int argc, char **argv) {
     // read once
     aio.Prepare(0, buf, op_size);
     aio.Submit();
-    aio.WaitOver();
+
+    auto ret = aio.WaitOver();
+    printf("read size = %d\n", ret);
 
     for (int i = 0; i < op_size; i++) {
       printf("%c", buf[i]);
