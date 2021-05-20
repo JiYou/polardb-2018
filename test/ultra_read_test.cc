@@ -117,14 +117,15 @@ int main(int argc, char **argv) {
     auto ret = aio.WaitOver();
     auto end_commit_time = std::chrono::system_clock::now();
 
-    auto get_diff_ns = [](decltype(start_submit_time) start,
-                          decltype(end_commit_time) end) {
+
+    auto get_diff_ns = [](const decltype(start_submit_time) &start,
+                          const decltype(end_commit_time) end) {
       return std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
       // 1,000 nanoseconds – one microsecond
       // 1,000 microseconds - one ms
     };
 
-    std::cout << get_diff_ns(start_commit_time, end_commit_time);
+    std::cout << get_diff_ns(start_commit_time, end_commit_time).count();
 
     printf("read size = %d\n", ret);
 
