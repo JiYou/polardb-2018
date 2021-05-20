@@ -117,9 +117,8 @@ int main(int argc, char **argv) {
     auto ret = aio.WaitOver();
     auto end_commit_time = std::chrono::system_clock::now();
 
-    using time_t = decltype(start_submit_time);
-
-    auto get_diff_ns = [](time_t& start, time_t& end) {
+    auto get_diff_ns = [](decltype(start_submit_time) start,
+                          decltype(end_commit_time) end) {
       return std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
       // 1,000 nanoseconds – one microsecond
       // 1,000 microseconds - one ms
