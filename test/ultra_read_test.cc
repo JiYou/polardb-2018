@@ -1,5 +1,6 @@
 
 #include "engine_race/engine_race.h"
+#include "engine_race/util.h"
 
 #include <bits/stdc++.h>
 
@@ -109,11 +110,23 @@ int main(int argc, char **argv) {
     char *buf = polar_race::GetAlignedBuffer(op_size);
     memset(buf, 0, op_size);
 
-    // read once
+    auto start_submit_time = std::chrono::system_clock::now();
     aio.Prepare(0/*read/write_pos*/, buf, op_size);
     aio.Submit();
-
+    auto start_commit_time = std::chrono::system_clock::now();
     auto ret = aio.WaitOver();
+    auto end_commit_time = std::chrono::system_clock::now();
+
+    using time_t = decltype(start_submit_time);
+
+    auto get_diff_ns = [](time_t& start, time_t& end) {
+      return std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
+      // 1,000 nanoseconds – one microsecond
+      // 1,000 microseconds - one ms
+    };
+
+    std::cout << get_diff_ns(start_commit_time, end_commit_time);
+
     printf("read size = %d\n", ret);
 
     for (int i = 0; i < op_size; i++) {
