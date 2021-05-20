@@ -28,6 +28,72 @@ static void exit_with_help() {
     exit(-1);
 }
 
+RetCode Open(const char *file_name, int flag, uint32_t mode,
+             int *fd) const {
+  assert(file_name);
+  assert(fd);
+  *fd = ::open(file_name, flag, mode);
+  if (*fd == -1) {
+    return kInvalidArgument;
+  }
+  return kSucc;
+}
+
+RetCode Fcntl(int fd, int cmd, void *lock) const {
+  struct flock *f = (struct flock *)lock;
+  auto ret = fcntl(fd, F_SETLK, f);
+  return ret == 0 ? kSucc : kIOError;
+}
+
+RetCode IOCtl(int fd, uint64_t request, uint64_t *size,
+                   int *result) const {
+  auto ret = ioctl(fd, BLKGETSIZE64, size);
+  if (result) {
+    *result = ret;
+  }
+  return ret != -1 ? kSucc : kIOError;
+}
+
+RetCode Stat(const char *file_name, void *stat_buf) const {
+  auto ret = ::stat(file_name, (struct stat *)stat_buf);
+  return ret == 0 ? kSucc : kIOError;
+}
+
+RetCode GetFileLength(const char *file_name,
+                      int64_t *file_size_result) const {
+  struct stat stat_buf;
+
+  int rc = Stat(file_name, &stat_buf);
+  auto file_size = rc == 0 ? stat_buf.st_size : -1;
+  uint64_t size = 0;
+
+  // or maybe this file is a device, then stat() not works well.
+  int fd = -1;
+  auto ret = Open(file_name, O_RDONLY, GetDeviceFileMode(), &fd);
+  if (ret != kSucc || fd == -1) {
+    goto open_device_failed;
+  }
+
+  if (IOCtl(fd, BLKGETSIZE64, &size, &rc /*ignored*/) != kSucc) {
+    goto open_device_failed;
+  }
+
+  Close(fd);
+  if (file_size_result) {
+    *file_size_result = size > file_size ? size : file_size;
+  }
+  return kSucc;
+
+open_device_failed:
+  if (file_size == -1) {
+    return kIOError;
+  }
+  if (file_size_result) {
+    *file_size_result = file_size;
+  }
+  return kSucc;
+}
+
 int main(int argc, char **argv) {
 
     const char *disk_path = nullptr;
@@ -105,6 +171,7 @@ int main(int argc, char **argv) {
 
     bool is_read = op_type == kReadOp;
     struct aio_env_single aio(fd, is_read, false/*no_alloc*/);
+
 
     // setup buffer
     char *buf = polar_race::GetAlignedBuffer(op_size);
