@@ -170,7 +170,7 @@ struct aio_env_single {
     int done_io_cnt = 0;
     do {
       int r = io_getevents(ctx, kSingleRequest, kSingleRequest,
-                        &events, &(timeout)) != kSingleRequest);
+                        &events, &(timeout));
       if (r > 0) {
         done_io_cnt += r;
       } else if (r == EFAULT) {
