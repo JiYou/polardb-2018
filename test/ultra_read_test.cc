@@ -95,8 +95,17 @@ int main(int argc, char **argv) {
         exit_with_help();
     }
 
-    struct aio_env_single read_aio(index_fd, true/*read*/, false/*no_alloc*/);
+    int fd = open(disk_path, O_RDWR | O_NOATIME | O_DIRECT | O_SYNC, 0644);
+    if (fd == -1) {
+      fprintf(stderr, "open file %s failed\n", disk_path);
+      return -1;
+    }
 
+    bool is_read = op_type == kReadOp;
+    struct aio_env_single read_aio(fd, is_read, false/*no_alloc*/);
+
+
+    close(fd);
 
     return 0;
 }
