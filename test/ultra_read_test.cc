@@ -107,11 +107,17 @@ int main(int argc, char **argv) {
 
     // setup buffer
     char *buf = polar_race::GetAlignedBuffer(op_size);
+    memset(buf, 0, op_size);
 
     // read once
     aio.Prepare(0, buf, op_size);
     aio.Submit();
     aio.WaitOver();
+
+    for (int i = 0; i < op_size; i++) {
+      printf("%c", buf[i]);
+    }
+    printf("\n");
 
     close(fd);
 
