@@ -309,7 +309,7 @@ main(int argc, char** argv)
   }
 
   disk_size = disk_size & (~(kBlockSize - 1));
-  std::cout << "disk_size = " << disk_size << std::endl;
+  std::cout << "disk_size = " << disk_size  / 1024 / 1024 << " MB" << std::endl;
 
   int fd = open(disk_path, O_RDWR | O_NOATIME | O_DIRECT | O_SYNC, 0644);
   if (fd == -1) {
