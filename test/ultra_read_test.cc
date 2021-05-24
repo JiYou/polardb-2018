@@ -152,6 +152,12 @@ open_device_failed:
   return kSucc;
 }
 
+// index stands for microsecond
+uint64_t time_stat[10000];
+
+void output_result(uint64_t iops, uint64_t total_time) {
+}
+
 int
 main(int argc, char** argv)
 {
@@ -204,7 +210,7 @@ main(int argc, char** argv)
       case 't':
         i++;
         run_time = stoi(argv[i]);
-        if (run_time > 100) {
+        if (run_time > 1000) {
           fprintf(stderr, "run too long time = %d\n", run_time);
           exit_with_help();
         }
@@ -248,8 +254,8 @@ main(int argc, char** argv)
   struct aio_env_single aio(fd, is_read, false /*no_alloc*/);
 
   // setup buffer
-  char* buf = polar_race::GetAlignedBuffer(op_size);
-  memset(buf, 0, op_size);
+  char* buf = polar_race::GetAlignedBuffer(op_size + overlap_size);
+  memset(buf, 0, op_size + overlap_size);
 
   auto start_time = std::chrono::system_clock::now();
   auto get_diff_ns = [](const decltype(start_time)& start,
@@ -259,29 +265,43 @@ main(int argc, char** argv)
     // 1,000 microseconds - one ms
   };
 
-  uint64_t time_cost = 0;
+  uint64_t time_cost_nanosecond = 0;
   uint64_t io_cnt = 0;
+  const uint64_t begin_pos = overlap_size;
+  uint64_t write_pos = begin_pos;
 
   while (true) {
     auto start_submit_time = std::chrono::system_clock::now();
-    aio.Prepare(0 /*read/write_pos*/, buf, op_size);
+
+    aio.Prepare(write_pos - overlap_size, buf, op_size + overlap_size);
     aio.Submit();
+    write_pos += op_size;
+
+    if (write_pos >= disk_size) {
+      write_pos = begin_pos;
+    }
+
     auto start_commit_time = std::chrono::system_clock::now();
     auto ret = aio.WaitOver();
+
     auto end_commit_time = std::chrono::system_clock::now();
 
-    time_cost = get_diff_ns(start_time,
-                            end_commit_time).count();
+    time_cost_nanosecond = get_diff_ns(start_time, end_commit_time).count();
     io_cnt++;
 
-    double ts = get_diff_ns(start_submit_time, end_commit_time).count() / 1000;
-    printf("%.4lf ms\n", ts / 1000);
-    if (time_cost > run_time *1000 * 1000 * 100) {
+    // nanosecond -> microsecond
+    uint64_t ts_microsecond =
+      get_diff_ns(start_submit_time, end_commit_time).count() / 1000;
+
+    time_stat[ts_microsecond]++;
+
+    if (time_cost_nanosecond > run_time * 1000 * 1000 * 1000) {
       break;
     }
   }
 
-  std::cout << "io_cnt = " << io_cnt << " : " << time_cost << std::endl;
+  std::cout << "io_cnt = " << io_cnt << " : " << time_cost_nanosecond
+            << std::endl;
 
   close(fd);
 
