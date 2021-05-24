@@ -155,7 +155,69 @@ open_device_failed:
 // index stands for microsecond
 uint64_t time_stat[10000];
 
-void output_result(uint64_t iops, uint64_t total_time) {
+uint64_t max_io_time = 0;
+uint64_t min_io_time = INT64_MAX;
+
+/**
+ * Function:
+ *  Used to print out the results of disk performance
+ *
+ * Arguments:
+ *  - IOPS: total iops during the time.
+ *  - total_time (nanoseconds): total running time
+ *  - unit_size (bytes): every read/write_size
+ *
+ * output: Just like fioi
+ *    |  1.00th=[ 1020],  5.00th=[ 1237], 10.00th=[ 1401], 20.00th=[ 7373],
+ *    | 30.00th=[ 7701], 40.00th=[ 7832], 50.00th=[ 7898], 60.00th=[ 7963],
+ *    | 70.00th=[ 8094], 80.00th=[ 8160], 90.00th=[ 8291], 95.00th=[ 8356],
+ *    | 99.00th=[ 8455], 99.50th=[ 8586], 99.90th=[ 8848], 99.95th=[ 8979],
+ *    | 99.99th=[ 9110]
+ */
+static void
+output_result(int op_type,
+              uint64_t iops,
+              uint64_t total_time,
+              uint64_t uint_size)
+{
+
+  static double per[] = { 1,  5,  10, 20, 30,   40,   50,    60,   70,
+                          80, 90, 95, 99, 99.5, 99.9, 99.95, 99.99 };
+
+  double per_ret[sizeof(per) / sizeof(*per)];
+
+  if (op_type == kReadOp) {
+    std::cout << "Op = "
+              << "Read" << std::endl;
+  } else {
+    std::cout << "Op = "
+              << "Write" << std::endl;
+  }
+
+  // iops per second
+  std::cout << "IOPS = " << (iops * 1000 * 1000) / total_time << std::endl;
+
+  // BW (bytes/second)
+  std::cout << "BW = " << (iops * uint_size * 1000 * 1000) / total_time
+            << std::endl;
+
+  double cnt = 0;
+  double total_item = iops;
+
+  int per_idx = 0;
+  // compute ops percentile
+  for (int i = min_io_time; i <= max_io_time; i++) {
+    // want percentile
+    if (cnt / total_item * 100.0 <= per[per_idx]) {
+      per_ret = (double)i / 1000.0;
+    } else {
+      per_idx++;
+    }
+  }
+
+  for (int i = 0; i < sizeof(per) / sizeof(*per); i++) {
+    printf("percentile %lf %= %.3lf (ms)\n", per[i], per_ret[i]);
+  }
 }
 
 int
@@ -292,6 +354,8 @@ main(int argc, char** argv)
     // nanosecond -> microsecond
     uint64_t ts_microsecond =
       get_diff_ns(start_submit_time, end_commit_time).count() / 1000;
+    max_io_time = max(max_io_time, ts_microsecond);
+    min_io_time = min(min_io_time, ts_microsecond);
 
     time_stat[ts_microsecond]++;
 
@@ -300,8 +364,7 @@ main(int argc, char** argv)
     }
   }
 
-  std::cout << "io_cnt = " << io_cnt << " : " << time_cost_nanosecond
-            << std::endl;
+  output_result(op_type, io_cnt, time_cost_nanosecond, overlap_size + op_size);
 
   close(fd);
 
