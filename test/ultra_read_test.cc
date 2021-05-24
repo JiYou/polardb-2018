@@ -180,7 +180,8 @@ output_result(int op_type,
               uint64_t uint_size)
 {
   printf("min_time = %.3f (ms)\n", (double)min_io_nanosecond / 1000.0 / 1000.0);
-  printf("max_io_time_nanosecond = %.3f (ms)\n", (double)max_io_time_nanosecond / 1000.0 / 1000.0);
+  printf("max_io_time_nanosecond = %.3f (ms)\n",
+         (double)max_io_time_nanosecond / 1000.0 / 1000.0);
   printf("total_iops = %lu\n", iops);
   printf("total_time = %.3f (ms)\n", double(total_time) / 1000.0 / 1000.0);
 
@@ -202,7 +203,9 @@ output_result(int op_type,
             << " iops/s" << std::endl;
 
   // BW (bytes/second)
-  std::cout << "BW = " << (double)(iops * uint_size * 1000 * 1000 * 1000) / (double)total_time / 1024 / 1024
+  std::cout << "BW = "
+            << (double)(iops * uint_size * 1000 * 1000 * 1000) /
+                 (double)total_time / 1024 / 1024
             << " MB/s" << std::endl;
 
   double cnt = 0;
@@ -211,7 +214,9 @@ output_result(int op_type,
   int per_idx = 0;
 
   // compute ops percentile
-  for (uint64_t i = min_io_nanosecond / 1000; i <= max_io_time_nanosecond / 1000; i++) {
+  for (uint64_t i = min_io_nanosecond / 1000;
+       i <= max_io_time_nanosecond / 1000;
+       i++) {
     // want percentile
     if (cnt / total_item * 100.0 <= per[per_idx]) {
       per_ret_ms[per_idx] = (double)i / 1000.0;
@@ -233,7 +238,7 @@ main(int argc, char** argv)
   int op_type = -1;
   int op_size = -1;
   int overlap_size = 0;
-  int run_time = 120;
+  uint64_t run_time = 120;
 
   // parse options
   for (int i = 1; i < argc; i++) {
@@ -274,11 +279,13 @@ main(int argc, char** argv)
           exit_with_help();
         }
         break;
+
+      // run time
       case 't':
         i++;
         run_time = stoi(argv[i]);
         if (run_time > 1000) {
-          fprintf(stderr, "run too long time = %d\n", run_time);
+          fprintf(stderr, "run too long time = %lu seconds\n", run_time);
           exit_with_help();
         }
         break;
@@ -309,7 +316,7 @@ main(int argc, char** argv)
   }
 
   disk_size = disk_size & (~(kBlockSize - 1));
-  std::cout << "disk_size = " << disk_size  / 1024 / 1024 << " MB" << std::endl;
+  std::cout << "disk_size = " << disk_size / 1024 / 1024 << " MB" << std::endl;
 
   int fd = open(disk_path, O_RDWR | O_NOATIME | O_DIRECT | O_SYNC, 0644);
   if (fd == -1) {
@@ -342,36 +349,31 @@ main(int argc, char** argv)
 
     aio.Prepare(write_pos - overlap_size, buf, op_size + overlap_size);
     aio.Submit();
-    write_pos += op_size;
 
+    auto start_commit_time = std::chrono::system_clock::now();
+
+    write_pos += op_size;
     if (write_pos >= disk_size) {
       write_pos = begin_pos;
     }
-
-    auto start_commit_time = std::chrono::system_clock::now();
     auto ret = aio.WaitOver();
 
     auto end_commit_time = std::chrono::system_clock::now();
 
-    time_cost_nanosecond = get_diff_ns(start_time, end_commit_time).count();
     io_cnt++;
 
     // nanosecond -> microsecond
     uint64_t current_io_nanosecond =
       get_diff_ns(start_submit_time, end_commit_time).count();
-
     max_io_time_nanosecond = max(max_io_time_nanosecond, current_io_nanosecond);
     min_io_nanosecond = min(min_io_nanosecond, current_io_nanosecond);
-
-    // std::cout << "current_io_nanosecond = " << current_io_nanosecond << std::endl;
-    // assert(current_io_nanosecond >= 0);
-    // assert(current_io_nanosecond < sizeof(time_stat_microsecond) / sizeof(*time_stat_microsecond));
-
     time_stat_microsecond[current_io_nanosecond / 1000]++;
 
-    if (time_cost_nanosecond > run_time * 1000 * 1000 * 1000) {
+    time_cost_nanosecond = get_diff_ns(start_time, end_commit_time).count();
+    if (time_cost_nanosecond >= run_time * 1000 * 1000 * 1000) {
       break;
     }
+
   }
 
   output_result(op_type, io_cnt, time_cost_nanosecond, overlap_size + op_size);
