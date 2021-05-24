@@ -153,10 +153,9 @@ open_device_failed:
 }
 
 // index stands for microsecond
-uint64_t time_stat[10000];
-
-uint64_t max_io_time = 0;
-uint64_t min_io_time = INT64_MAX;
+static uint64_t time_stat_microsecond[1000000];
+static uint64_t max_io_time_nanosecond = 0;
+static uint64_t min_io_nanosecond = INT64_MAX;
 
 /**
  * Function:
@@ -167,7 +166,7 @@ uint64_t min_io_time = INT64_MAX;
  *  - total_time (nanoseconds): total running time
  *  - unit_size (bytes): every read/write_size
  *
- * output: Just like fioi
+ * output: Just like fio
  *    |  1.00th=[ 1020],  5.00th=[ 1237], 10.00th=[ 1401], 20.00th=[ 7373],
  *    | 30.00th=[ 7701], 40.00th=[ 7832], 50.00th=[ 7898], 60.00th=[ 7963],
  *    | 70.00th=[ 8094], 80.00th=[ 8160], 90.00th=[ 8291], 95.00th=[ 8356],
@@ -180,11 +179,15 @@ output_result(int op_type,
               uint64_t total_time,
               uint64_t uint_size)
 {
+  printf("min_time = %.3f (ms)\n", (double)min_io_nanosecond / 1000.0 / 1000.0);
+  printf("max_io_time_nanosecond = %.3f (ms)\n", (double)max_io_time_nanosecond / 1000.0 / 1000.0);
+  printf("total_iops = %lu\n", iops);
+  printf("total_time = %.3f (ms)\n", double(total_time) / 1000.0 / 1000.0);
 
   static double per[] = { 1,  5,  10, 20, 30,   40,   50,    60,   70,
                           80, 90, 95, 99, 99.5, 99.9, 99.95, 99.99 };
 
-  double per_ret[sizeof(per) / sizeof(*per)];
+  double per_ret_ms[sizeof(per) / sizeof(*per)];
 
   if (op_type == kReadOp) {
     std::cout << "Op = "
@@ -195,35 +198,37 @@ output_result(int op_type,
   }
 
   // iops per second
-  std::cout << "IOPS = " << (iops * 1000 * 1000) / total_time << std::endl;
+  std::cout << "IOPS = " << (iops * 1000 * 1000 * 1000) / total_time
+            << " iops/s" << std::endl;
 
   // BW (bytes/second)
-  std::cout << "BW = " << (iops * uint_size * 1000 * 1000) / total_time
-            << std::endl;
+  std::cout << "BW = " << (double)(iops * uint_size * 1000 * 1000 * 1000) / (double)total_time / 1024 / 1024
+            << " MB/s" << std::endl;
 
   double cnt = 0;
   double total_item = iops;
 
   int per_idx = 0;
+
   // compute ops percentile
-  for (int i = min_io_time; i <= max_io_time; i++) {
+  for (uint64_t i = min_io_nanosecond / 1000; i <= max_io_time_nanosecond / 1000; i++) {
     // want percentile
     if (cnt / total_item * 100.0 <= per[per_idx]) {
-      per_ret = (double)i / 1000.0;
+      per_ret_ms[per_idx] = (double)i / 1000.0;
     } else {
       per_idx++;
     }
+    cnt += time_stat_microsecond[i];
   }
 
   for (int i = 0; i < sizeof(per) / sizeof(*per); i++) {
-    printf("percentile %lf %= %.3lf (ms)\n", per[i], per_ret[i]);
+    printf("percentile %.2lf %%= %.3lf (ms)\n", per[i], per_ret_ms[i]);
   }
 }
 
 int
 main(int argc, char** argv)
 {
-
   const char* disk_path = nullptr;
   int op_type = -1;
   int op_size = -1;
@@ -352,12 +357,17 @@ main(int argc, char** argv)
     io_cnt++;
 
     // nanosecond -> microsecond
-    uint64_t ts_microsecond =
-      get_diff_ns(start_submit_time, end_commit_time).count() / 1000;
-    max_io_time = max(max_io_time, ts_microsecond);
-    min_io_time = min(min_io_time, ts_microsecond);
+    uint64_t current_io_nanosecond =
+      get_diff_ns(start_submit_time, end_commit_time).count();
 
-    time_stat[ts_microsecond]++;
+    max_io_time_nanosecond = max(max_io_time_nanosecond, current_io_nanosecond);
+    min_io_nanosecond = min(min_io_nanosecond, current_io_nanosecond);
+
+    // std::cout << "current_io_nanosecond = " << current_io_nanosecond << std::endl;
+    // assert(current_io_nanosecond >= 0);
+    // assert(current_io_nanosecond < sizeof(time_stat_microsecond) / sizeof(*time_stat_microsecond));
+
+    time_stat_microsecond[current_io_nanosecond / 1000]++;
 
     if (time_cost_nanosecond > run_time * 1000 * 1000 * 1000) {
       break;
