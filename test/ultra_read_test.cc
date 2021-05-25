@@ -242,7 +242,7 @@ main(int argc, char** argv)
 
   printf("CMD: ");
   for (int i = 0; i < argc; i++) {
-    printf("%s", argv[i]);
+    printf("%s ", argv[i]);
   }
   printf("\n");
 
