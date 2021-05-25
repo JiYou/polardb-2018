@@ -180,7 +180,7 @@ output_result(int op_type,
               uint64_t uint_size)
 {
   printf("min_time = %.3f (ms)\n", (double)min_io_nanosecond / 1000.0 / 1000.0);
-  printf("max_io_time_nanosecond = %.3f (ms)\n",
+  printf("max_time = %.3f (ms)\n",
          (double)max_io_time_nanosecond / 1000.0 / 1000.0);
   printf("total_iops = %lu\n", iops);
   printf("total_time = %.3f (ms)\n", double(total_time) / 1000.0 / 1000.0);
@@ -239,6 +239,12 @@ main(int argc, char** argv)
   int op_size = -1;
   int overlap_size = 0;
   uint64_t run_time = 120;
+
+  printf("CMD: ");
+  for (int i = 0; i < argc; i++) {
+    printf("%s", argv[i]);
+  }
+  printf("\n");
 
   // parse options
   for (int i = 1; i < argc; i++) {
