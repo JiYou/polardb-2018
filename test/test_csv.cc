@@ -41,11 +41,20 @@ int disk_size = -1;
 double percentile = -1;
 
 struct file_info {
-  int op_type;
-  int op_size;
-  int overlap_size;
+  // file titile format:
+  // disk_size-overlap_size-op_size-op_type
+  // disk size from file title. (G)
   int disk_size;
+  int overlap_size;
+  int op_size;
+  int op_type;
+
+  // info from file content
+  double min_latency;
+  double max_latency;
   double percentile;
+  int iops;
+  double bw_mb;
 };
 
 static vector<string> to_words(string &s) {
@@ -66,7 +75,7 @@ static vector<string> to_words(string &s) {
   return ans;
 }
 
-static struct file_info filter_file(string file_name) {
+static struct file_info get_file_title_info(string file_name) {
   auto words = to_words(s);
 
   struct file_info ans;
@@ -74,9 +83,22 @@ static struct file_info filter_file(string file_name) {
   auto disk_size = words[0];
   disk_size.pop_back();
   ans.disk_size = stoi(disk_size.c_str());
+
+  ans.overlap_size = stoi(words[1].c_str());
+  ans.op_size = stoi(words[2].c_str());
+  ans.op_type = words.back() == "r" ? kReadOp : kWriteOp;
+
+  // percentile need to read from file content.
 }
 
-static void printdir(const char *dir) {
+static double get_file_content_info(string file_name) {
+  ifstream input(file_name);
+  string line;
+  while (getline(input, line, '\n') != EOF) {
+  }
+}
+
+static void scan_dir(const char *dir) {
 
   DIR *dp;
   struct dirent *entry;
@@ -171,7 +193,7 @@ int main(int argc, char **argv) {
     exit_with_help();
   }
 
-  printdir(dir_path.c_str());
+  scan_dir(dir_path.c_str());
 
   return 0;
 }
