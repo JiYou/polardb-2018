@@ -1,0 +1,12 @@
+#!/bin/bash
+
+set -e
+
+for overlap_size in 0 512 1024 1536 2048 2560 3072 3584 4096; do
+  for op_size in 512 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288 1048576; do
+    for op in r w; do
+      ./ultra_read_test -${op} -l ${op_size} -v ${overlap_size} -t 40 /dev/sdc | tee 8192G-${overlap_size}-${op_size}-${op}
+    done
+  done
+done
+
