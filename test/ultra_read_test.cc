@@ -204,7 +204,7 @@ output_result(int op_type,
 
   // BW (bytes/second)
   std::cout << "BW = "
-            << (double)(iops * uint_size * 1000 * 1000 * 1000) /
+            << (double)((double)iops * (double)uint_size * 1000 * 1000 * 1000) /
                  (double)total_time / 1024 / 1024
             << " MB/s" << std::endl;
 
