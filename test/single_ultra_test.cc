@@ -25,6 +25,16 @@ enum
 };
 
 static void
+Sleep(int ms)
+{
+    if (ms <= 0) {
+      return;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
+
+static void
 exit_with_help()
 {
   printf("Usage: ultra_disk_test [option] disk_full_path\n"
@@ -214,12 +224,17 @@ output_result(int op_type,
   int per_idx = 0;
 
   // compute ops percentile
-  for (uint64_t i = min_io_nanosecond / 1000;
+  for (uint64_t i = min_io_nanosecond/ 1000;
        i <= max_io_time_nanosecond / 1000;
        i++) {
     // want percentile
     if (cnt / total_item * 100.0 <= per[per_idx]) {
       per_ret_ms[per_idx] = (double)i / 1000.0;
+
+      if (per_idx + 1 < sizeof(per_ret_ms) / sizeof(*per_ret_ms)) {
+        per_ret_ms[per_idx + 1] = (double) i / 1000.0;
+      }
+
     } else {
       per_idx++;
     }
@@ -341,7 +356,7 @@ main(int argc, char** argv)
 
   auto start_time = std::chrono::system_clock::now();
   auto get_diff_ns = [](const decltype(start_time)& start,
-                        const decltype(start_time) end) {
+                        const decltype(start_time)& end) {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
     // 1,000 nanoseconds – one microsecond
     // 1,000 microseconds - one ms
@@ -352,42 +367,43 @@ main(int argc, char** argv)
   const uint64_t begin_pos = overlap_size;
   uint64_t write_pos = begin_pos;
 
-  while (true) {
-    auto start_submit_time = std::chrono::system_clock::now();
+  constexpr uint64_t total_write_test = 10000;
+
+  uint64_t time_cost[total_write_test];
+
+  for (int i = 0; i < total_write_test; i++) {
+    auto start = std::chrono::system_clock::now();
 
     aio.Prepare(write_pos - overlap_size, buf, op_size + overlap_size);
     aio.Submit();
-
-    auto start_commit_time = std::chrono::system_clock::now();
 
     write_pos += op_size;
     if (write_pos >= disk_size) {
       write_pos = begin_pos;
     }
     auto ret = aio.WaitOver();
+    auto end = std::chrono::system_clock::now();
 
-    auto end_commit_time = std::chrono::system_clock::now();
-
-    io_cnt++;
-
-    // nanosecond -> microsecond
-    uint64_t current_io_nanosecond =
-      get_diff_ns(start_submit_time, end_commit_time).count();
+    uint64_t current_io_nanosecond = get_diff_ns(start, end).count();
     max_io_time_nanosecond = max(max_io_time_nanosecond, current_io_nanosecond);
     min_io_nanosecond = min(min_io_nanosecond, current_io_nanosecond);
 
-    time_stat_microsecond[current_io_nanosecond / 1000]++;
+    time_cost[i] = current_io_nanosecond;
+    time_stat_microsecond[time_cost[i] / 1000]++;
 
-    time_cost_nanosecond = get_diff_ns(start_time, end_commit_time).count();
-    if (time_cost_nanosecond >= run_time * 1000 * 1000 * 1000) {
-      break;
-    }
+    Sleep(10);
+  }
+  close(fd);
 
+  time_cost_nanosecond = 0;
+  for (int i = 0; i < total_write_test; i++) {
+    std::cout << time_cost[i] / 1000 << std::endl;
+    time_cost_nanosecond += time_cost[i];
   }
 
-  output_result(op_type, io_cnt, time_cost_nanosecond, overlap_size + op_size);
+  printf("Write test over\n");
 
-  close(fd);
+  output_result(op_type, total_write_test, time_cost_nanosecond, overlap_size + op_size);
 
   return 0;
 }
