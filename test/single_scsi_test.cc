@@ -52,6 +52,7 @@
 #define RAW_MAJOR 255 /*unlikely value */
 #endif
 
+// /sys/block/sdb/queue/max_hw_sectors_kb = 512 这个会限制每次能传输的数据的大小
 
 using namespace std;
 using namespace polar_race;
