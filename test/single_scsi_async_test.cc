@@ -360,6 +360,8 @@ static int read_capacity(int sg_fd, int *num_sect, int *sect_sz) {
   return 0;
 }
 
+static int pack_id = 0;
+
 static int
 sg_build_scsi_cdb(uint8_t *cdbp,
                   int cdb_sz,
@@ -377,7 +379,7 @@ sg_build_scsi_cdb(uint8_t *cdbp,
 
   memset(cdbp, 0, cdb_sz);
   cdbp[0] = write_true ? SGP_WRITE10 : SGP_READ10;
-  cdbp[1] = 0x2;
+  // cdbp[1] = 0x2;
 
   sg_put_unaligned_be32(start_block, cdbp + 2);
   sg_put_unaligned_be16(blocks, cdbp + 7);
@@ -452,7 +454,7 @@ sg_write(int sg_fd,
   hp.sbp = sb;
   hp.timeout = DEF_TIMEOUT;
   hp.usr_ptr = NULL;
-  hp.pack_id = to_block;
+  hp.pack_id = pack_id++;
 
   if (diop && *diop) {
     hp.flags |= SG_FLAG_DIRECT_IO;
@@ -461,7 +463,7 @@ sg_write(int sg_fd,
   while (((res = write(sg_fd, &hp, sizeof(sg_io_hdr_t))) < 0) &&
          (EINTR == errno))
     ;
-  
+
   printf("res = %d\n", res);
   assert(res >= 0);
 
@@ -478,10 +480,10 @@ static int sg_write_over(int sg_fd,
   memset(&io_hdr, 0, sizeof(sg_io_hdr_t));
   io_hdr.interface_id = 'S';
   io_hdr.dxfer_direction = is_write ? SG_DXFER_TO_DEV : SG_DXFER_FROM_DEV;
-  io_hdr.pack_id = to_blocks;
+  io_hdr.pack_id = pack_id -1;
 
   while (((res = read(sg_fd, &io_hdr, sizeof(sg_io_hdr_t))) < 0) &&
-         (EINTR == errno))
+         (EINTR == errno) || 0 == res)
     ;
 
   assert(res >= 0);
