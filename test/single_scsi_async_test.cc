@@ -460,6 +460,7 @@ sg_write(int sg_fd,
   hp.pack_id = pack_id++;
 
   if (diop && *diop) {
+    printf("DIRECT write\n");
     hp.flags |= SG_FLAG_DIRECT_IO;
   }
 
@@ -651,7 +652,7 @@ int main(int argc, char **argv) {
     {
 
       if (i == 0 || fds[0].revents & POLLIN) {
-        bool direct_io = false;
+        bool direct_io = true;
         auto ret = SCSI::sg_write(fd,
                                   buf,
                                   (op_size + overlap_size) / kBlockSize /*block per write*/,
