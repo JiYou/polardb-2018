@@ -265,6 +265,7 @@ uint8_t cmd[S_RW_LEN];
 
 uint8_t sb[SENSE_BUFF_LEN];
 
+
 static inline uint32_t sg_get_unaligned_be32(const void *p) {
   return ((const uint8_t *)p)[0] << 24 | ((const uint8_t *)p)[1] << 16 |
          ((const uint8_t *)p)[2] << 8 | ((const uint8_t *)p)[3];
@@ -276,10 +277,14 @@ static inline void sg_put_unaligned_be16(uint16_t val, void *p)
   ((uint8_t *)p)[1] = (uint8_t)val;
 }
 
-static inline void sg_put_unaligned_be32(uint32_t val, void *p)
-{
+static inline void sg_put_unaligned_be32(uint32_t val, void *p) {
   sg_put_unaligned_be16(val >> 16, p);
   sg_put_unaligned_be16(val, (uint8_t *)p + 2);
+}
+
+static inline uint64_t sg_get_unaligned_be64(const void *p) {
+  return (uint64_t)sg_get_unaligned_be32(p) << 32 |
+    sg_get_unaligned_be32((const uint8_t *)p + 4);
 }
 
 static int sg_prepare(int fd, int sz) {
@@ -325,12 +330,18 @@ static int dd_filetype(const char *filename) {
 }
 
 // 这里只是发指令去拿一个设备的大小
-static int read_capacity(int sg_fd, int *num_sect, int *sect_sz) {
+static int read_capacity(int sg_fd, uint64_t *num_sect, uint64_t *sect_sz) {
   int res = -1;
-  uint8_t rc_cdb[10] = {0x25, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-  uint8_t rcBuff[64];
+  uint8_t rc_cdb[16] = {0x9e, 0x10,
+                        0, 0, 0, 0,
+                        0, 0, 0, 0,
+                        0, 0, 0, 0,
+                        0, 0};
+  uint8_t recv_buffer[64];
   uint8_t sense_b[64];
   sg_io_hdr_t io_hdr;
+
+  sg_put_unaligned_be32((uint32_t)64, rc_cdb + 10);
 
   memset(&io_hdr, 0, sizeof(sg_io_hdr_t));
 
@@ -338,8 +349,8 @@ static int read_capacity(int sg_fd, int *num_sect, int *sect_sz) {
   io_hdr.cmd_len = sizeof(rc_cdb);
   io_hdr.mx_sb_len = sizeof(sense_b);
   io_hdr.dxfer_direction = SG_DXFER_FROM_DEV;
-  io_hdr.dxfer_len = sizeof(rcBuff);
-  io_hdr.dxferp = rcBuff;
+  io_hdr.dxfer_len = sizeof(recv_buffer);
+  io_hdr.dxferp = recv_buffer;
   io_hdr.cmdp = rc_cdb;
   io_hdr.sbp = sense_b;
   io_hdr.timeout = DEF_TIMEOUT;
@@ -349,13 +360,8 @@ static int read_capacity(int sg_fd, int *num_sect, int *sect_sz) {
     return -1;
   }
 
-  // res = sg_err_category3(&io_hdr);
-  // assert(res == 0);
-
-  *num_sect = 1 + sg_get_unaligned_be32(rcBuff + 0);
-  *sect_sz = sg_get_unaligned_be32(rcBuff + 4);
-
-  std::cout << *num_sect << " : " << *sect_sz << std::endl;
+  *num_sect = sg_get_unaligned_be64(recv_buffer + 0) + 1;
+  *sect_sz = sg_get_unaligned_be32(recv_buffer + 8);
 
   return 0;
 }
@@ -372,18 +378,15 @@ sg_build_scsi_cdb(uint8_t *cdbp,
                   bool fua,
                   bool dpo)
 {
-  // 读的编码
-  int rd_opcode[] = {0x8, 0x28/*只用这个*/, 0xa8, 0x88};
-  // 写的编码
-  int wr_opcode[] = {0xa, 0x2a/*只用这个*/, 0xaa, 0x8a};
+  memset(cmd, 0, sizeof(cmd));
+  cmd[0] = SGP_WRITE10;
 
-  memset(cdbp, 0, cdb_sz);
-  cdbp[0] = write_true ? SGP_WRITE10 : SGP_READ10;
-  // cdbp[1] = 0x2;
+  // rep->blk = start_block
+  // sg_put_unaligned_be32(start_block, cdbp + 2);
+  // sg_put_unaligned_be16(blocks, cdbp + 7);
 
-  sg_put_unaligned_be32(start_block, cdbp + 2);
-  sg_put_unaligned_be16(blocks, cdbp + 7);
-
+  sg_put_unaligned_be32((uint32_t)start_block, cmd + 2);
+  sg_put_unaligned_be16((uint16_t)blocks, cmd + 7);
   return 0;
 }
 
@@ -460,12 +463,11 @@ sg_write(int sg_fd,
     hp.flags |= SG_FLAG_DIRECT_IO;
   }
 
-  while (((res = write(sg_fd, &hp, sizeof(sg_io_hdr_t))) < 0) &&
-         (EINTR == errno))
-    ;
-
-  printf("res = %d\n", res);
-  assert(res >= 0);
+  while (((res = write(sg_fd, &hp,
+            sizeof(sg_io_hdr_t))) < 0) &&
+             (EINTR == errno))
+        ;
+  assert(res > 0);
 
   return 0;
 }
@@ -612,8 +614,8 @@ int main(int argc, char **argv) {
     return -1;
   }
 
-  int disk_sectors = 0;
-  int sector_size_in_bytes = 0;
+  uint64_t disk_sectors = 0;
+  uint64_t sector_size_in_bytes = 0;
 
   // SCSI pre check
   {
@@ -660,7 +662,6 @@ int main(int argc, char **argv) {
                                   false/*FUA*/,
                                   false/*dpo*/,
                                   &direct_io);
-        printf("+");
         assert(ret == 0);
 
         fds[0].fd = fd;
@@ -668,11 +669,12 @@ int main(int argc, char **argv) {
       }
 
       int res = 0;
-      while (((res = poll(fds, 1, 0)) < 0) &&
-         (EINTR == errno))
-      ;
+      while ((((res = poll(fds, 1, 0)) < 0) && (EINTR == errno)) ||
+             (0 == res))
+        ;
 
-      assert(res >= 0);
+      assert(res > 0);
+      assert(fds[0].revents & POLLIN);
 
       SCSI::sg_write_over(fd, true, (write_pos - overlap_size) / kBlockSize);
     }
@@ -691,7 +693,7 @@ int main(int argc, char **argv) {
     time_cost[i] = current_io_nanosecond;
     time_stat_microsecond[time_cost[i] / 1000]++;
 
-    // Sleep(3);
+    Sleep(3);
   }
   close(fd);
 
